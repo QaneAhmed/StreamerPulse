@@ -20,9 +20,15 @@ type SummaryChannel = NonNullable<Exclude<WorkspaceSummary, null>>["channel"];
 export default async function SettingsPage() {
   const [{ userId }, user] = await Promise.all([auth(), currentUser()]);
 
-  const summary: WorkspaceSummary = userId
-    ? await fetchQuery(api.users.getWorkspaceSummary, { clerkUserId: userId })
-    : null;
+  let summary: WorkspaceSummary = null;
+  if (userId) {
+    try {
+      summary = await fetchQuery(api.users.getWorkspaceSummary, { clerkUserId: userId });
+    } catch (error) {
+      console.error("[settings] Failed to load workspace summary", error);
+      summary = null;
+    }
+  }
 
   const twitchAccount = user?.externalAccounts?.find((account) =>
     account.provider?.toLowerCase().includes("twitch")

@@ -1218,19 +1218,21 @@ export default function DashboardShell({
           </div>
         </div>
 
-        <div className="flex h-[36rem] flex-col overflow-hidden rounded-3xl border border-slate-800 bg-slate-950/80 p-5 shadow-lg shadow-slate-950/40">
+        <div className="flex h-[36rem] flex-col rounded-3xl border border-slate-800 bg-slate-950/80 p-5 shadow-lg shadow-slate-950/40">
           <header className="flex items-center justify-between gap-3">
             <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Community voice</p>
             <span className="text-xs text-slate-500">
               {alerts.length ? `${alerts.length} highlight${alerts.length === 1 ? "" : "s"}` : "Collecting"}
             </span>
           </header>
-          <div className="mt-4 flex flex-1 flex-col gap-4">
-            <div className="flex-1 overflow-y-auto pr-3">
-              <AlertList alerts={alerts} />
+          <div className="mt-4 flex flex-1 flex-col gap-4 min-h-0">
+            <div className="flex-1 overflow-hidden min-h-0">
+              <div className="h-full overflow-y-auto pr-3">
+                <AlertList alerts={alerts} />
+              </div>
             </div>
-            <div className="grid flex-1 gap-4 overflow-hidden lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.5fr)]">
-              <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="grid flex-1 gap-4 overflow-hidden min-h-0 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.5fr)]">
+              <div className="flex flex-1 flex-col overflow-hidden min-h-0">
                 <div className="flex-1 overflow-y-auto pr-2">
                   <TrendList
                     title="Top Emotes"
@@ -1243,7 +1245,7 @@ export default function DashboardShell({
                   />
                 </div>
               </div>
-              <div className="flex flex-1 flex-col overflow-hidden">
+              <div className="flex flex-1 flex-col overflow-hidden min-h-0">
                 <QuestionList questions={derived.questions} />
               </div>
             </div>
@@ -1473,22 +1475,22 @@ function QuestionList({ questions }: QuestionListProps) {
   return (
     <div className="flex h-full flex-col space-y-2">
       <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Questions</p>
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden min-h-0">
         <ul className="flex flex-1 flex-col divide-y divide-slate-800 overflow-y-auto rounded-2xl border border-slate-800 bg-slate-900/40 pr-1 text-slate-200">
-          {questions.map((question) => (
+          {questions.slice(0, 10).map((question) => (
             <li key={question.id} className="space-y-1 px-4 py-3 text-base leading-snug">
               <p className="font-medium text-slate-100">
                 {truncateText(question.text, 160)}
               </p>
               <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.25em] text-slate-500">
                 <span className="truncate">@{question.author}</span>
-                <span className="h-2 w-px bg-slate-700" />
-                <span>{timeFormatter.format(new Date(question.timestamp))}</span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
+              <span className="h-2 w-px bg-slate-700" />
+              <span>{timeFormatter.format(new Date(question.timestamp))}</span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
     </div>
   );
 }

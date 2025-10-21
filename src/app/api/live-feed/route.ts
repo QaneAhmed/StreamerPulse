@@ -150,18 +150,29 @@ export async function POST(request: Request) {
       (body as { channelLogin?: unknown }).channelLogin ??
       (body as { channelSlug?: unknown }).channelSlug;
 
-    if (typeof channelRaw !== "string" || !channelRaw.trim()) {
-      return NextResponse.json({ error: "Channel value required" }, { status: 400 });
+    let channel: string | null = null;
+    if (typeof channelRaw === "string" && channelRaw.trim()) {
+      channel = channelRaw.toLowerCase().trim();
     }
 
-    const channel = channelRaw.toLowerCase().trim();
-
-    const updates = Array.isArray((body as { updates?: unknown[] }).updates)
+    const updatesArray = Array.isArray((body as { updates?: unknown[] }).updates)
       ? (body as { updates?: unknown[] }).updates
       : null;
 
-    if (updates) {
-      for (const update of updates) {
+    if (!channel) {
+      channel = deriveChannelFromUpdates(updatesArray ?? [body]);
+      if (channel) {
+        console.warn("[api/live-feed] Derived channel from payload", channel);
+      }
+    }
+
+    if (!channel) {
+      console.warn("[api/live-feed] Missing channel in payload", body);
+      return NextResponse.json({ error: "Channel value required" }, { status: 400 });
+    }
+
+    if (updatesArray) {
+      for (const update of updatesArray) {
         broadcast(channel, update);
       }
       return new NextResponse(null, { status: 204 });
@@ -176,4 +187,32 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+}
+
+function deriveChannelFromUpdates(updates: unknown[]): string | null {
+  for (const update of updates) {
+    if (!update || typeof update !== "object") {
+      continue;
+    }
+
+    const direct = (update as { channel?: unknown }).channel;
+    if (typeof direct === "string" && direct.trim()) {
+      return direct.toLowerCase().trim();
+    }
+
+    const payload = (update as { payload?: any }).payload;
+    if (payload && typeof payload === "object") {
+      const payloadChannel = payload.channel ?? payload.channelLogin ?? payload.channelSlug;
+      if (typeof payloadChannel === "string" && payloadChannel.trim()) {
+        return payloadChannel.toLowerCase().trim();
+      }
+
+      const sessionChannel = payload.session?.channel ?? payload.session?.channelLogin;
+      if (typeof sessionChannel === "string" && sessionChannel.trim()) {
+        return sessionChannel.toLowerCase().trim();
+      }
+    }
+  }
+
+  return null;
 }

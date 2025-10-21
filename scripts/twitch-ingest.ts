@@ -722,26 +722,74 @@ function extractFallbackEmotes(message: string) {
   return Array.from(candidates);
 }
 
-async function sendLiveFeedUpdates(channel: string, updates: unknown[]) {
+async function sendLiveFeedUpdates(channel: string | { channelLogin?: string; channel?: string }, updates: unknown[]) {
   if (updates.length === 0) {
     return;
   }
+
+  let channelSlug = "";
+  if (typeof channel === "string") {
+    channelSlug = channel.trim().toLowerCase();
+  } else if (channel && typeof channel === "object") {
+    channelSlug =
+      channel.channel?.toLowerCase()?.trim?.() ?? channel.channelLogin?.toLowerCase()?.trim?.() ?? "";
+  }
+  if (!channelSlug) {
+    console.warn("[live-feed] Skipping broadcast due to missing channel identifier");
+    return;
+  }
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[live-feed] Posting updates", {
+      channel: channelSlug,
+      count: updates.length,
+      sample: (updates[0] as any)?.type ?? null,
+    });
+  }
+
+  const normalizedUpdates = updates.map((update) => {
+    if (update && typeof update === "object") {
+      return {
+        channel: channelSlug,
+        channelLogin: channelSlug,
+        channelSlug,
+        ...update,
+      };
+    }
+
+    return {
+      channel: channelSlug,
+      channelLogin: channelSlug,
+      channelSlug,
+      payload: update,
+    };
+  });
 
   const response = await fetch(liveFeedUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ channel, updates }),
+    body: JSON.stringify({
+      channel: channelSlug,
+      channelLogin: channelSlug,
+      channelSlug,
+      updates: normalizedUpdates,
+    }),
   });
 
   if (!response.ok) {
     const text = await response.text();
-    console.warn("[live-feed] Failed to POST update", response.status, text);
+    console.warn(
+      "[live-feed] Failed to POST update",
+      response.status,
+      text,
+      JSON.stringify({ channel: channelSlug, channelLogin: channelSlug, channelSlug, updates })
+    );
   }
 }
 
-async function postLiveFeed(channel: string, update: unknown) {
+async function postLiveFeed(channel: string | { channelLogin?: string; channel?: string }, update: unknown) {
   await sendLiveFeedUpdates(channel, [update]);
 }
 
@@ -1018,20 +1066,27 @@ async function main() {
 
       aggregator.reset();
       pendingMessages = [];
-      await postLiveFeed(twitchChannel, { type: "reset" });
+      await postLiveFeed(twitchChannel, {
+        type: "reset",
+        channel: twitchChannel,
+        channelLogin: twitchChannel,
+      });
 
       activeStreamId = session.streamId;
       sessionStartedAt = now;
       lastReportedStatus = "live";
 
-        await postLiveFeed(twitchChannel, {
-          type: "session",
-          payload: {
-            status: "listening",
-            channel: channelDisplayName,
-            startedAt: now,
-          },
-        });
+      await postLiveFeed(twitchChannel, {
+        type: "session",
+        channel: twitchChannel,
+        channelLogin: twitchChannel,
+        payload: {
+          status: "listening",
+          channel: channelDisplayName,
+          channelLogin: twitchChannel,
+          startedAt: now,
+        },
+      });
     } catch (error) {
       const err = error as any;
       console.error("[ingestion] Failed to start session", {
@@ -1052,9 +1107,12 @@ async function main() {
       lastReportedStatus = "offline";
       await postLiveFeed(twitchChannel, {
         type: "session",
+        channel: twitchChannel,
+        channelLogin: twitchChannel,
         payload: {
           status: "idle",
           channel: channelDisplayName,
+          channelLogin: twitchChannel,
           startedAt: null,
         },
       });
@@ -1078,9 +1136,12 @@ async function main() {
 
     await postLiveFeed(twitchChannel, {
       type: "session",
+      channel: twitchChannel,
+      channelLogin: twitchChannel,
       payload: {
         status: "idle",
         channel: channelDisplayName,
+        channelLogin: twitchChannel,
         startedAt: null,
       },
     });
@@ -1101,9 +1162,12 @@ async function main() {
         lastReportedStatus = "live";
         await postLiveFeed(twitchChannel, {
           type: "session",
+          channel: twitchChannel,
+          channelLogin: twitchChannel,
           payload: {
             status: "listening",
             channel: channelDisplayName,
+            channelLogin: twitchChannel,
             startedAt: sessionStartedAt,
           },
         });
@@ -1113,9 +1177,12 @@ async function main() {
         pendingMessages = [];
         await postLiveFeed(twitchChannel, {
           type: "session",
+          channel: twitchChannel,
+          channelLogin: twitchChannel,
           payload: {
             status: "idle",
             channel: channelDisplayName,
+            channelLogin: twitchChannel,
             startedAt: null,
           },
         });
@@ -1257,11 +1324,17 @@ async function main() {
       const liveFeedBatch: unknown[] = [
         {
           type: "chat",
-          payload: chatPayload,
+          channel: twitchChannel,
+          channelLogin: twitchChannel,
+          payload: { ...chatPayload, channel: twitchChannel, channelLogin: twitchChannel },
         },
         {
           type: "metrics",
+          channel: twitchChannel,
+          channelLogin: twitchChannel,
           payload: {
+            channel: twitchChannel,
+            channelLogin: twitchChannel,
             messageRate: snapshot.messageRate,
             sentiment: snapshot.sentiment,
             uniqueChatters: snapshot.uniqueChatters,
@@ -1271,7 +1344,11 @@ async function main() {
         },
         {
           type: "audience",
+          channel: twitchChannel,
+          channelLogin: twitchChannel,
           payload: {
+            channel: twitchChannel,
+            channelLogin: twitchChannel,
             uniqueChatters: snapshot.uniqueChatters,
             newcomers: snapshot.newcomers,
             sentimentScore: snapshot.sentiment,
@@ -1283,14 +1360,22 @@ async function main() {
         },
         {
           type: "tokens",
+          channel: twitchChannel,
+          channelLogin: twitchChannel,
           payload: {
+            channel: twitchChannel,
+            channelLogin: twitchChannel,
             tokens: snapshot.topTokens,
             emotes: snapshot.topEmotes,
           },
         },
         {
           type: "timeline",
+          channel: twitchChannel,
+          channelLogin: twitchChannel,
           payload: {
+            channel: twitchChannel,
+            channelLogin: twitchChannel,
             point: aggregator.getTimelinePoint(timestamp),
           },
         },
@@ -1299,7 +1384,11 @@ async function main() {
       if (snapshot.event) {
         liveFeedBatch.push({
           type: "events",
+          channel: twitchChannel,
+          channelLogin: twitchChannel,
           payload: {
+            channel: twitchChannel,
+            channelLogin: twitchChannel,
             event: snapshot.event,
           },
         });
