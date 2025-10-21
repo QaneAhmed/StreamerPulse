@@ -3,6 +3,28 @@
 import { SignIn } from "@clerk/nextjs";
 
 export default function SignInPage() {
+  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+  if (!publishableKey) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10 text-slate-100">
+        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/70 p-8 text-center text-sm text-slate-300 shadow-lg shadow-slate-950/40 backdrop-blur">
+          <p className="text-xs uppercase tracking-[0.4em] text-violet-300">
+            StreamLens Beta
+          </p>
+          <h1 className="mt-4 text-xl font-semibold text-slate-100">
+            Authentication not configured
+          </h1>
+          <p className="mt-3">
+            Set <code className="font-mono text-violet-300">NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY</code>{" "}
+            and <code className="font-mono text-violet-300">CLERK_SECRET_KEY</code> in your environment
+            to enable Clerk sign-in.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10 text-slate-100">
       <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-lg shadow-slate-950/40 backdrop-blur">
@@ -19,7 +41,7 @@ export default function SignInPage() {
         <SignIn
           routing="path"
           path="/sign-in"
-          forceRedirectUrl="/dashboard"
+          forceRedirectUrl="/dashboard/connect"
           appearance={{
             elements: {
               formButtonPrimary:

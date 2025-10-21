@@ -5,15 +5,25 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
-    "start": "next start"
+    "start": "next start",
+    "ingest:twitch": "tsx scripts/twitch-ingest.ts",
+    "simulate:chatters": "node scripts/simulate-chatters.mjs",
+    "deploy:prod": "CONVEX_DEPLOYMENT=prod:scrupulous-mandrill-560 npx convex deploy",
+    "deploy:dev": "CONVEX_DEPLOYMENT=dev:scrupulous-mandrill-560 npx convex deploy"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^2.0.52",
     "@clerk/nextjs": "^6.33.3",
     "@clerk/themes": "^2.4.25",
-    "convex": "^1.27.5",
+    "ai": "^5.0.75",
+    "convex": "^1.28.0",
+    "dotenv": "^16.4.5",
     "next": "15.5.4",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "sentiment": "^5.0.2",
+    "tmi.js": "^1.8.5",
+    "tsx": "^4.20.6",
     "zod": "^4.1.12"
   },
   "devDependencies": {

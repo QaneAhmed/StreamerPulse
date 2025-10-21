@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppClerkProvider } from "@/components/providers/app-clerk-provider";
+import { AppConvexProvider } from "@/components/providers/app-convex-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,7 +32,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} h-full antialiased text-slate-100`}
       >
-        <AppClerkProvider>{children}</AppClerkProvider>
+        <AppClerkProvider>
+          <AppConvexProvider>{children}</AppConvexProvider>
+        </AppClerkProvider>
       </body>
     </html>
   );

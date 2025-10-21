@@ -21,7 +21,12 @@ export default function AppHeader() {
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-violet-500/20 text-violet-300">
           SL
         </span>
-        StreamLens
+        <span className="flex items-center gap-2">
+          StreamLens
+          <span className="rounded-full border border-violet-500/40 bg-violet-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.25em] text-violet-200">
+            Beta
+          </span>
+        </span>
       </Link>
       <nav className="ml-auto flex items-center gap-6 text-sm text-slate-400">
         {navItems.map((item) => (

@@ -1,0 +1,6 @@
+{
+  "deployment": {
+    "prod": "https://scrupulous-mandrill-560.convex.cloud",
+    "preview": "replace-with-preview-deployment-url"
+  }
+}
