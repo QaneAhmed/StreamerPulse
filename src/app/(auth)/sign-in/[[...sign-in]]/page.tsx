@@ -1,9 +1,23 @@
 'use client';
 
+import { useMemo } from "react";
+import { useSearchParams } from "next/navigation";
 import { SignIn } from "@clerk/nextjs";
+import { resolveSiteUrl } from "@/lib/site-url";
 
 export default function SignInPage() {
   const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const searchParams = useSearchParams();
+
+  const redirectUrl = useMemo(() => {
+    const siteUrl = resolveSiteUrl();
+    const raw = searchParams?.get("redirect_url") ?? "/dashboard/connect";
+    if (raw.startsWith("http://") || raw.startsWith("https://")) {
+      return raw;
+    }
+    const normalized = raw.startsWith("/") ? raw : `/${raw}`;
+    return `${siteUrl}${normalized}`;
+  }, [searchParams]);
 
   if (!publishableKey) {
     return (
@@ -41,7 +55,8 @@ export default function SignInPage() {
         <SignIn
           routing="path"
           path="/sign-in"
-          forceRedirectUrl="/dashboard/connect"
+          redirectUrl={redirectUrl}
+          forceRedirectUrl={redirectUrl}
           appearance={{
             elements: {
               formButtonPrimary:

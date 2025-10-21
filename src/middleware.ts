@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { clerkMiddleware } from "@clerk/nextjs/server";
+import { resolveSiteUrl } from "@/lib/site-url";
 
 const publicRoutes = ["/api/live-feed"];
 
@@ -11,7 +12,11 @@ export default clerkMiddleware(async (auth, req) => {
 
   const authResult = await auth();
   if (!authResult.userId) {
-    return authResult.redirectToSignIn({ returnBackUrl: req.url });
+    const siteUrl = resolveSiteUrl({ headers: req.headers });
+    const redirectPath = `${url.pathname}${url.search}`;
+    const redirectParam = encodeURIComponent(redirectPath);
+    const destination = `${siteUrl}/sign-in?redirect_url=${redirectParam}`;
+    return NextResponse.redirect(destination);
   }
 
   return NextResponse.next();
