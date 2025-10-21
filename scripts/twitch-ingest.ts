@@ -598,7 +598,47 @@ const convexAdminKey = safeEnv("CONVEX_ADMIN_KEY");
 const convexAdminIdentity = process.env.CONVEX_ADMIN_IDENTITY
   ? JSON.parse(process.env.CONVEX_ADMIN_IDENTITY)
   : undefined;
-const liveFeedUrl = process.env.LIVE_FEED_URL ?? "http://localhost:3000/api/live-feed";
+function resolveLiveFeedUrl() {
+  const explicitUrl = coalesceString([
+    process.env.LIVE_FEED_URL,
+    process.env.NEXT_PUBLIC_LIVE_FEED_URL,
+  ]);
+  if (explicitUrl) {
+    return explicitUrl;
+  }
+
+  const origin = coalesceString([
+    process.env.LIVE_FEED_ORIGIN,
+    process.env.NEXT_PUBLIC_LIVE_FEED_ORIGIN,
+    process.env.NEXT_PUBLIC_SITE_URL,
+    process.env.NEXT_PUBLIC_APP_URL,
+    process.env.NEXT_PUBLIC_BASE_URL,
+    process.env.APP_URL,
+    process.env.SITE_URL,
+    process.env.PUBLIC_URL,
+    process.env.URL,
+    process.env.RENDER_EXTERNAL_URL,
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
+  ]);
+
+  if (origin) {
+    const normalizedOrigin = origin.replace(/\/?$/, "");
+    return `${normalizedOrigin}/api/live-feed`;
+  }
+
+  return "http://localhost:3000/api/live-feed";
+}
+
+function coalesceString(candidates: Array<string | undefined>): string | undefined {
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
+
+const liveFeedUrl = resolveLiveFeedUrl();
 
 let tokenExpiry = Date.now() + 3 * 60 * 60 * 1000;
 let moodAiCooldownUntil = 0;
