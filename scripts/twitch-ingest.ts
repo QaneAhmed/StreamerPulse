@@ -4,6 +4,7 @@ import { config as loadEnv } from "dotenv";
 
 loadEnv({ path: ".env.local" });
 loadEnv();
+import { spawn } from "child_process";
 import { createHash, randomUUID } from "crypto";
 import { generateObject } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -11,6 +12,7 @@ import { z } from "zod";
 import tmi from "tmi.js";
 import Sentiment from "sentiment";
 import { ConvexHttpClient } from "convex/browser";
+import { internal } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import {
   buildMoodAnalysisUserPrompt,
@@ -589,12 +591,9 @@ function safeEnv(name: string): string {
 }
 
 const twitchClientId = safeEnv("TWITCH_CLIENT_ID");
-const twitchClientSecret = safeEnv("TWITCH_CLIENT_SECRET");
 const explicitChannel = process.env.TWITCH_CHANNEL?.toLowerCase();
 const explicitChannelId = process.env.TWITCH_CHANNEL_ID;
 const explicitChannelDisplay = process.env.TWITCH_CHANNEL_DISPLAY_NAME;
-let userAccessToken = safeEnv("TWITCH_USER_ACCESS_TOKEN");
-let userRefreshToken = safeEnv("TWITCH_USER_REFRESH_TOKEN");
 const convexUrl =
   process.env.NEXT_PUBLIC_CONVEX_URL ??
   process.env.CONVEX_URL ??
@@ -710,63 +709,75 @@ if (liveFeedUrl === LIVE_FEED_FALLBACK_URL) {
   );
 }
 
-let tokenExpiry = Date.now() + 3 * 60 * 60 * 1000;
-let moodAiCooldownUntil = 0;
-let moodAiCooldownLogged = false;
-let moodAiResumeLogged = false;
+const isChildProcess = process.env.INGEST_CHILD === "1";
 
-async function refreshUserToken() {
-  const params = new URLSearchParams({
-    client_id: twitchClientId,
-    client_secret: twitchClientSecret,
-    refresh_token: userRefreshToken,
-    grant_type: "refresh_token",
-  });
+type ChannelIntegration = {
+  channelLogin: string;
+  channelDisplayName: string;
+  channelId: string;
+};
 
-  const response = await fetch("https://id.twitch.tv/oauth2/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: params.toString(),
-  });
+type CredentialLease = {
+  channelLogin: string;
+  channelDisplayName: string;
+  channelId: string;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number | null;
+  username: string;
+};
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`Failed to refresh Twitch token: ${response.status} ${errorBody}`);
+function parseChannelList(value?: string | null): string[] | null {
+  if (!value) {
+    return null;
   }
 
-  const body: {
-    access_token: string;
-    refresh_token: string;
-    expires_in: number;
-    scope: string[];
-    token_type: "bearer";
-  } = await response.json();
+  const list = value
+    .split(/[,\s]+/)
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.length > 0);
 
-  userAccessToken = body.access_token;
-  userRefreshToken = body.refresh_token;
-  tokenExpiry = Date.now() + body.expires_in * 1000;
+  if (list.length === 0) {
+    return null;
+  }
 
-  console.log("[twitch] Refreshed user access token. Update TWITCH_USER_REFRESH_TOKEN with:");
-  console.log(userRefreshToken);
+  return Array.from(new Set(list));
 }
 
-async function ensureFreshToken() {
-  const margin = 15 * 60 * 1000;
-  if (Date.now() > tokenExpiry - margin) {
-    await refreshUserToken();
-  }
-}
+const explicitChannelFilter =
+  parseChannelList(process.env.TWITCH_CHANNELS ?? process.env.TWITCH_CHANNEL_ALLOWLIST) ?? null;
 
-async function tryRefreshTokenSilently() {
-  try {
-    await refreshUserToken();
-    return true;
-  } catch (error) {
-    console.error("[twitch] Token refresh failed after authentication error", error);
-    return false;
+async function resolveIntegrationsList(convex: ConvexHttpClient): Promise<ChannelIntegration[]> {
+  const raw = await (convex as any).query("ingestion/getActiveChannels:getActiveChannels", {});
+  const channelList: ChannelIntegration[] = (Array.isArray(raw) ? raw : []).map(
+    (integration: any) => ({
+      channelLogin: (integration.channelLogin as string) ?? "",
+      channelDisplayName:
+        (integration.channelDisplayName as string) ?? integration.channelLogin ?? "",
+      channelId: (integration.channelId as string) ?? integration.channelLogin ?? "",
+    })
+  );
+
+  let filtered = channelList.filter((integration) => integration.channelLogin);
+
+  if (explicitChannelFilter && explicitChannelFilter.length > 0) {
+    const allow = new Set(explicitChannelFilter.map((login) => login.toLowerCase()));
+    filtered = filtered.filter((integration) =>
+      allow.has(integration.channelLogin.toLowerCase())
+    );
   }
+
+  if (filtered.length === 0 && explicitChannel) {
+    filtered = [
+      {
+        channelLogin: explicitChannel,
+        channelDisplayName: explicitChannelDisplay ?? explicitChannel,
+        channelId: explicitChannelId ?? explicitChannel,
+      },
+    ];
+  }
+
+  return filtered;
 }
 
 function hashAuthor(userId: string | undefined, login: string) {
@@ -903,7 +914,95 @@ async function postLiveFeed(channel: string | { channelLogin?: string; channel?:
   await sendLiveFeedUpdates(channel, [update]);
 }
 
-async function main() {
+async function orchestrateMultiChannelIngestion() {
+  const convex = new ConvexHttpClient(convexUrl);
+  (convex as any).setAdminAuth?.(convexAdminKey, convexAdminIdentity);
+
+  const integrations = await resolveIntegrationsList(convex);
+
+  if (integrations.length === 0) {
+    console.warn("[manager] No connected Twitch integrations found. Nothing to ingest.");
+    return;
+  }
+
+  console.log(
+    `[manager] Starting ingestion workers for ${integrations
+      .map((integration) => `#${integration.channelLogin}`)
+      .join(", ")}.`
+  );
+
+  const childProcesses = integrations.map((integration) => {
+    const childEnv: NodeJS.ProcessEnv = { ...process.env, INGEST_CHILD: "1" };
+    childEnv.TWITCH_CHANNEL = integration.channelLogin;
+    childEnv.TWITCH_CHANNEL_ID = integration.channelId;
+    childEnv.TWITCH_CHANNEL_DISPLAY_NAME = integration.channelDisplayName;
+
+    const child = spawn(process.argv[0], process.argv.slice(1), {
+      env: childEnv,
+      stdio: "inherit",
+    });
+
+    return { process: child, integration };
+  });
+
+  let shuttingDown = false;
+
+  const shutdown = (signal: NodeJS.Signals) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    console.warn(`[manager] Received ${signal}. Shutting down ingestion workers…`);
+    for (const { process: child } of childProcesses) {
+      if (!child.killed) {
+        try {
+          child.kill(signal);
+        } catch (error) {
+          console.warn("[manager] Failed to propagate signal to child", error);
+        }
+      }
+    }
+  };
+
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+
+  await Promise.all(
+    childProcesses.map(({ process: child, integration }) =>
+      new Promise<void>((resolve, reject) => {
+        child.once("error", (error) => {
+          console.error(`[manager] Ingestion worker for #${integration.channelLogin} failed`, error);
+          resolve();
+        });
+        child.once("exit", (code, signal) => {
+          console.log(
+            `[manager] Ingestion worker for #${integration.channelLogin} exited (code=${code}, signal=${signal ?? "none"}).`
+          );
+          resolve();
+        });
+      })
+    )
+  );
+}
+
+async function leaseChannelCredentials(
+  convex: ConvexHttpClient,
+  channelLogin: string,
+  forceRefresh = false
+): Promise<CredentialLease> {
+  const result = await (convex as any).action("ingestion/tokens:leaseCredentials", {
+    channelLogin,
+    forceRefresh,
+  });
+
+  if (!result) {
+    throw new Error(`Failed to lease Twitch credentials for ${channelLogin}`);
+  }
+
+  return result as CredentialLease;
+}
+
+async function runSingleChannelIngest() {
   const convex = new ConvexHttpClient(convexUrl);
   (convex as any).setAdminAuth?.(convexAdminKey, convexAdminIdentity);
 
@@ -916,16 +1015,23 @@ async function main() {
 
   let activeStreamId: Id<"streams"> | null = null;
   let sessionStartedAt: number | null = null;
-  let authMode: AuthMode = "oauth";
   let statusPollTimer: ReturnType<typeof setInterval> | null = null;
   let lastReportedStatus: "live" | "offline" = "offline";
 
   const integration = await resolveIntegration(convex);
   console.log("[ingestion] Using integration", integration);
   const twitchChannel = integration.channelLogin.toLowerCase();
-  const twitchUsername = (process.env.TWITCH_USERNAME ?? integration.channelLogin).toLowerCase();
-  const channelDisplayName = integration.channelDisplayName ?? integration.channelLogin;
+  const initialLease = await leaseChannelCredentials(convex, twitchChannel);
+  let userAccessToken = initialLease.accessToken;
+  let userRefreshToken = initialLease.refreshToken;
+  let tokenExpiry = initialLease.expiresAt ?? Date.now() + 60 * 60 * 1000;
+  let moodAiCooldownUntil = 0;
+  let moodAiCooldownLogged = false;
+  let moodAiResumeLogged = false;
+  const twitchUsername = (initialLease.username ?? integration.channelLogin).toLowerCase();
+  const channelDisplayName = initialLease.channelDisplayName ?? integration.channelDisplayName ?? integration.channelLogin;
   const preferredAuth: AuthMode = userAccessToken ? "oauth" : "anonymous";
+  let authMode: AuthMode = preferredAuth;
 
   const connectionConfig = {
     reconnect: true,
@@ -935,38 +1041,57 @@ async function main() {
     maxReconnectInterval: 60000,
   };
 
+  async function ensureFreshToken(force = false) {
+    const margin = 15 * 60 * 1000;
+    const shouldRefresh =
+      force ||
+      !userAccessToken ||
+      !tokenExpiry ||
+      tokenExpiry - Date.now() <= margin;
+
+    if (!shouldRefresh) {
+      return;
+    }
+
+    const refreshed = await leaseChannelCredentials(convex, twitchChannel, true);
+    userAccessToken = refreshed.accessToken;
+    userRefreshToken = refreshed.refreshToken;
+    tokenExpiry = refreshed.expiresAt ?? Date.now() + 60 * 60 * 1000;
+    authMode = userAccessToken ? "oauth" : "anonymous";
+  }
+
   async function analyzeChatSlice(messages: ChatMessagePayload[]) {
     const apiKey = process.env.VERCEL_AI_API_KEY;
-  if (!apiKey) {
-    if (!llmApiMissingLogged) {
-      console.warn(
-        "[ai] VERCEL_AI_API_KEY not set. Mood analysis will be skipped until the key is provided."
-      );
-      llmApiMissingLogged = true;
+    if (!apiKey) {
+      if (!llmApiMissingLogged) {
+        console.warn(
+          "[ai] VERCEL_AI_API_KEY not set. Mood analysis will be skipped until the key is provided."
+        );
+        llmApiMissingLogged = true;
+      }
+      return null;
     }
-    return null;
-  }
 
-  const now = Date.now();
-  if (moodAiCooldownUntil && now >= moodAiCooldownUntil) {
-    moodAiCooldownUntil = 0;
-    moodAiCooldownLogged = false;
-    moodAiResumeLogged = false;
-    console.info("[ai] Resuming mood analysis after cooldown.");
-  }
-
-  if (moodAiCooldownUntil && now < moodAiCooldownUntil) {
-    if (!moodAiCooldownLogged) {
-      const remainingMinutes = Math.ceil((moodAiCooldownUntil - now) / 60000);
-      console.warn(
-        `[ai] Skipping mood analysis during cooldown window (~${remainingMinutes} minute${
-          remainingMinutes === 1 ? "" : "s"
-        } remaining).`
-      );
-      moodAiCooldownLogged = true;
+    const now = Date.now();
+    if (moodAiCooldownUntil && now >= moodAiCooldownUntil) {
+      moodAiCooldownUntil = 0;
+      moodAiCooldownLogged = false;
+      moodAiResumeLogged = false;
+      console.info("[ai] Resuming mood analysis after cooldown.");
     }
-    return null;
-  }
+
+    if (moodAiCooldownUntil && now < moodAiCooldownUntil) {
+      if (!moodAiCooldownLogged) {
+        const remainingMinutes = Math.ceil((moodAiCooldownUntil - now) / 60000);
+        console.warn(
+          `[ai] Skipping mood analysis during cooldown window (~${remainingMinutes} minute${
+            remainingMinutes === 1 ? "" : "s"
+          } remaining).`
+        );
+        moodAiCooldownLogged = true;
+      }
+      return null;
+    }
 
     const contextSource = messages.slice(-MAX_MESSAGES_PER_LLM_CALL);
 
@@ -1117,13 +1242,20 @@ async function main() {
   }, LLM_INTERVAL_MS);
 
   function buildClient(mode: AuthMode) {
-    const identity =
-      mode === "oauth"
-        ? {
-            username: twitchUsername,
-            password: `oauth:${userAccessToken}`,
-          }
-        : undefined;
+    let identity: { username: string; password: string } | undefined;
+
+    if (mode === "oauth") {
+      if (!userAccessToken) {
+        console.warn(
+          `[twitch:${twitchChannel}] OAuth mode requested but access token is missing. Falling back to anonymous connection.`
+        );
+      } else {
+        identity = {
+          username: twitchUsername,
+          password: `oauth:${userAccessToken}`,
+        };
+      }
+    }
 
     return new tmi.Client({
       identity,
@@ -1138,7 +1270,19 @@ async function main() {
     });
   }
 
+  let streamStatusWarningLogged = false;
+
   async function fetchStreamLive(login: string) {
+    if (!userAccessToken) {
+      if (!streamStatusWarningLogged) {
+        console.warn(
+          `[twitch:${twitchChannel}] No access token available. Stream status polling disabled; ingestion will rely on chat activity.`
+        );
+        streamStatusWarningLogged = true;
+      }
+      return false;
+    }
+
     await ensureFreshToken();
     const response = await fetch(`https://api.twitch.tv/helix/streams?user_login=${login}`, {
       method: "GET",
@@ -1354,6 +1498,11 @@ async function main() {
     instance.on("message", async (channelName: string, tags: Tags, message: string, self: boolean) => {
       if (self) return;
 
+      const messageId = (tags.id as string) ?? randomUUID();
+      const authorDisplay =
+        (tags["display-name"] as string) ?? (tags.username as string) ?? "anon";
+      const timestamp = Number.parseInt((tags["tmi-sent-ts"] as string) ?? `${Date.now()}`, 10);
+
       if (authMode === "oauth") {
         try {
           await ensureFreshToken();
@@ -1364,13 +1513,12 @@ async function main() {
       }
 
       if (!activeStreamId) {
-        return;
+        if (!userAccessToken) {
+          await startIngestionSession(timestamp);
+        } else {
+          return;
+        }
       }
-
-      const messageId = (tags.id as string) ?? randomUUID();
-      const authorDisplay =
-        (tags["display-name"] as string) ?? (tags.username as string) ?? "anon";
-      const timestamp = Number.parseInt((tags["tmi-sent-ts"] as string) ?? `${Date.now()}`, 10);
       const tokens = tokenizeMessage(message);
       const emotes = extractEmotes(message, tags);
       const fallbackEmotes = extractFallbackEmotes(message);
@@ -1521,23 +1669,30 @@ async function main() {
         oauthClient.removeAllListeners();
         if (isAuthFailure(error)) {
           console.warn("[twitch] OAuth login failed. Attempting token refresh…");
-          const refreshed = await tryRefreshTokenSilently();
-          if (refreshed) {
-            const retryClient = buildClient("oauth");
-            wireClient(retryClient);
-            try {
-              authMode = "oauth";
-              await retryClient.connect();
-              return retryClient;
-            } catch (retryError) {
-              retryClient.removeAllListeners();
+          try {
+            await ensureFreshToken(true);
+            if (userAccessToken) {
+              const retryClient = buildClient("oauth");
+              wireClient(retryClient);
+              try {
+                authMode = "oauth";
+                await retryClient.connect();
+                return retryClient;
+              } catch (retryError) {
+                retryClient.removeAllListeners();
+                console.warn(
+                  "[twitch] Authentication still failing after refresh. Falling back to anonymous mode."
+                );
+              }
+            } else {
               console.warn(
-                "[twitch] Authentication still failing after refresh. Falling back to anonymous mode."
+                "[twitch] Could not refresh user token. Falling back to anonymous Twitch connection."
               );
             }
-          } else {
+          } catch (refreshError) {
             console.warn(
-              "[twitch] Could not refresh user token. Falling back to anonymous Twitch connection."
+              "[twitch] Token refresh failed after authentication error. Falling back to anonymous connection.",
+              refreshError
             );
           }
         } else {
@@ -1565,15 +1720,18 @@ async function main() {
     return;
   }
 
-  process.on("SIGINT", async () => {
-    console.log("\n[ingestion] Shutting down...");
+  const handleShutdown = async (signal: NodeJS.Signals) => {
+    console.log(`\n[ingestion] Shutting down (${signal})...`);
     client.disconnect().catch(() => {});
     if (statusPollTimer) {
       clearInterval(statusPollTimer);
     }
     await endIngestionSession();
     process.exit(0);
-  });
+  };
+
+  process.on("SIGINT", handleShutdown);
+  process.on("SIGTERM", handleShutdown);
 }
 
 function countEmotes(items: string[]) {
@@ -1590,48 +1748,57 @@ function countEmotes(items: string[]) {
   return Array.from(counts.values()).map(({ name, count }) => ({ code: name, count }));
 }
 
-async function resolveIntegration(convex: ConvexHttpClient) {
-  const channels = await (convex as any).query("ingestion/getActiveChannels:getActiveChannels", {});
-  console.log("[ingestion] Linked channels", channels);
+async function resolveIntegration(convex: ConvexHttpClient): Promise<ChannelIntegration> {
+  const integrations = await resolveIntegrationsList(convex);
+  console.log("[ingestion] Linked channels", integrations);
 
-  const channelList = Array.isArray(channels) ? channels : [];
-
-  if (channelList.length > 0) {
-    const preferredChannels = channelList.filter(
-      (integration: any) => !integration.channelLogin.toLowerCase().includes("demo")
+  if (integrations.length === 0) {
+    throw new Error(
+      "No connected Twitch integrations found in Convex. Sign in through the dashboard to link a channel."
     );
-    const list = preferredChannels.length > 0 ? preferredChannels : channelList;
-    if (explicitChannel) {
-      const matched = list.find(
-        (integration) => integration.channelLogin.toLowerCase() === explicitChannel
-      );
-      if (!matched) {
-        console.warn(
-          "Configured TWITCH_CHANNEL does not match any linked integration. Using first linked channel instead.",
-          { explicitChannel, linkedChannels: list.map((c) => c.channelLogin) }
-        );
-      }
-      return matched ?? list[0];
-    }
-    if (list.length > 1) {
-      throw new Error(
-        "Multiple Twitch integrations found. Set TWITCH_CHANNEL in your environment to pick which channel to ingest."
-      );
-    }
-    return list[0];
   }
+
+  const normalized = integrations.map((integration) => ({
+    channelLogin: integration.channelLogin,
+    channelDisplayName: integration.channelDisplayName,
+    channelId: integration.channelId,
+  }));
+
+  const nonDemo = normalized.filter(
+    (integration) => !integration.channelLogin.toLowerCase().includes("demo")
+  );
+  const prioritized = nonDemo.length > 0 ? nonDemo : normalized;
 
   if (explicitChannel) {
-    return {
-      channelLogin: explicitChannel,
-      channelDisplayName: explicitChannelDisplay ?? explicitChannel,
-      channelId: explicitChannelId ?? explicitChannel,
-    };
+    const matched = prioritized.find(
+      (integration) => integration.channelLogin.toLowerCase() === explicitChannel
+    );
+    if (!matched) {
+      console.warn(
+        "Configured TWITCH_CHANNEL does not match any linked integration. Using first linked channel instead.",
+        { explicitChannel, linkedChannels: prioritized.map((channel) => channel.channelLogin) }
+      );
+    }
+    return matched ?? prioritized[0];
   }
 
-  throw new Error(
-    "No connected Twitch integrations found in Convex. Sign in through the dashboard to link a channel."
-  );
+  if (prioritized.length > 1) {
+    console.warn(
+      "Multiple Twitch integrations found. Defaulting to the first. Set TWITCH_CHANNEL to choose a specific one.",
+      { linkedChannels: prioritized.map((channel) => channel.channelLogin) }
+    );
+  }
+
+  return prioritized[0];
+}
+
+async function main() {
+  if (isChildProcess) {
+    await runSingleChannelIngest();
+    return;
+  }
+
+  await orchestrateMultiChannelIngestion();
 }
 
 main().catch((error) => {

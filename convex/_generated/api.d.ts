@@ -13,6 +13,7 @@ import type * as ingestion_appendChatMessage from "../ingestion/appendChatMessag
 import type * as ingestion_endSession from "../ingestion/endSession.js";
 import type * as ingestion_getActiveChannels from "../ingestion/getActiveChannels.js";
 import type * as ingestion_startSession from "../ingestion/startSession.js";
+import type * as ingestion_tokens from "../ingestion/tokens.js";
 import type * as users from "../users.js";
 
 import type {
@@ -35,6 +36,7 @@ declare const fullApi: ApiFromModules<{
   "ingestion/endSession": typeof ingestion_endSession;
   "ingestion/getActiveChannels": typeof ingestion_getActiveChannels;
   "ingestion/startSession": typeof ingestion_startSession;
+  "ingestion/tokens": typeof ingestion_tokens;
   users: typeof users;
 }>;
 declare const fullApiWithMounts: typeof fullApi;

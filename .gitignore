@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+streamerlense.sh
 
 # debug
 npm-debug.log*

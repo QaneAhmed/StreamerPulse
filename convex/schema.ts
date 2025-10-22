@@ -158,4 +158,17 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_stream", ["streamId"]),
+
+  integrationTokens: defineTable({
+    integrationId: v.id("integrations"),
+    accessToken: v.string(),
+    refreshToken: v.string(),
+    tokenType: v.optional(v.string()),
+    scope: v.optional(v.array(v.string())),
+    expiresAt: v.optional(v.number()),
+    obtainedAt: v.number(),
+    username: v.optional(v.string()),
+    providerUserId: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_integration", ["integrationId"]),
 });

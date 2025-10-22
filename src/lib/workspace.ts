@@ -5,6 +5,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { fetchMutation } from "convex/nextjs";
 import { api, internal } from "../../convex/_generated/api";
 import { readEnv } from "./env";
+import type { Id } from "../../convex/_generated/dataModel";
 
 export async function ensureWorkspace(userId: string) {
   try {
@@ -64,10 +65,15 @@ export async function ensureWorkspace(userId: string) {
 
     const env = readEnv();
     const convexAdminKey = env.CONVEX_ADMIN_KEY;
+    const workspaceSecret = env.CONVEX_WORKSPACE_SECRET;
+    let ensureResult:
+      | { workspaceId: string; integrationId: string; userId: string }
+      | null = null;
+
     if (!convexAdminKey) {
       const workspaceSecret = env.CONVEX_WORKSPACE_SECRET;
       try {
-        await fetchMutation(api.users.ensureWorkspaceFromServer, {
+        ensureResult = await fetchMutation(api.users.ensureWorkspaceFromServer, {
           clerkUserId: user.id,
           fallbackClerkUserId: `twitch:${channelLogin}`,
           channelId,
@@ -78,6 +84,17 @@ export async function ensureWorkspace(userId: string) {
       } catch (mutationError) {
         console.error("[workspace] Public ensureWorkspace mutation failed", mutationError);
       }
+      if (!ensureResult) {
+        return;
+      }
+
+      await storeChannelTokens({
+        user,
+        channelLogin,
+        channelId,
+        integrationId: ensureResult.integrationId,
+        workspaceSecret,
+      });
       return;
     }
 
@@ -90,14 +107,146 @@ export async function ensureWorkspace(userId: string) {
     const convexClient = new ConvexHttpClient(convexUrl);
     (convexClient as any).setAdminAuth?.(convexAdminKey, convexAdminIdentity);
 
-    await (convexClient as any).mutation(internal.users.ensureWorkspace, {
+    ensureResult = await (convexClient as any).mutation(internal.users.ensureWorkspace, {
       clerkUserId: user.id,
       fallbackClerkUserId: `twitch:${channelLogin}`,
       channelId,
       channelLogin,
       channelDisplayName: displayName ?? channelLogin,
     });
+
+    if (ensureResult) {
+      await storeChannelTokens({
+        user,
+        channelLogin,
+        channelId,
+        integrationId: ensureResult.integrationId,
+        convexClient,
+      });
+    }
   } catch (error) {
     console.error("Failed to ensure workspace linkage", error);
+  }
+}
+
+type StoreTokenArgs = {
+  user: any;
+  channelLogin: string;
+  channelId: string;
+  integrationId: string;
+  convexClient?: ConvexHttpClient;
+  workspaceSecret?: string;
+};
+
+async function storeChannelTokens({
+  user,
+  channelLogin,
+  channelId,
+  integrationId,
+  convexClient,
+  workspaceSecret,
+}: StoreTokenArgs) {
+  try {
+    const client = await clerkClient();
+    let tokens:
+      | Array<{
+          token?: string;
+          accessToken?: string;
+          refreshToken?: string;
+          expiresAt?: number | string | null;
+          expiresIn?: number | null;
+          expires_in?: number | null;
+          scopes?: string[];
+          scope?: string[] | string;
+          tokenType?: string;
+        }>
+      | null = null;
+
+    const providerCandidates = ["oauth_twitch", "twitch"];
+    for (const provider of providerCandidates) {
+      try {
+        const fetched = await client.users.getUserOauthAccessToken(user.id, provider as any);
+        if (Array.isArray(fetched) && fetched.length > 0) {
+          tokens = fetched;
+          break;
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+
+    if (!tokens || tokens.length === 0) {
+      console.warn("[workspace] No Twitch OAuth tokens available from Clerk", {
+        userId: user.id,
+        channelLogin,
+      });
+      return;
+    }
+
+    const primary = tokens[0] as any;
+    const accessToken =
+      typeof primary?.token === "string"
+        ? primary.token
+        : typeof primary?.accessToken === "string"
+          ? primary.accessToken
+          : null;
+    const refreshToken =
+      typeof primary?.refreshToken === "string" ? primary.refreshToken : null;
+
+    if (!accessToken || !refreshToken) {
+      console.warn("[workspace] Missing access or refresh token from Clerk payload", {
+        userId: user.id,
+        channelLogin,
+      });
+      return;
+    }
+
+    let expiresAt: number | undefined;
+    if (typeof primary?.expiresAt === "number") {
+      expiresAt = primary.expiresAt;
+    } else if (typeof primary?.expires_at === "number") {
+      expiresAt = primary.expires_at;
+    } else if (typeof primary?.expiresAt === "string") {
+      const parsed = Date.parse(primary.expiresAt);
+      if (!Number.isNaN(parsed)) {
+        expiresAt = parsed;
+      }
+    } else if (typeof primary?.expires_in === "number") {
+      expiresAt = Date.now() + primary.expires_in * 1000;
+    } else if (typeof primary?.expiresIn === "number") {
+      expiresAt = Date.now() + primary.expiresIn * 1000;
+    }
+
+    const scopeRaw = primary?.scopes ?? primary?.scope;
+    const scope = Array.isArray(scopeRaw)
+      ? scopeRaw.map((entry: unknown) => String(entry))
+      : typeof scopeRaw === "string"
+        ? scopeRaw.split(" ").map((entry) => entry.trim()).filter(Boolean)
+        : undefined;
+
+    const integrationIdRef = integrationId as Id<"integrations">;
+
+    const payload = {
+      integrationId: integrationIdRef,
+      accessToken,
+      refreshToken,
+      expiresAt,
+      scope,
+      tokenType: typeof primary?.tokenType === "string" ? primary.tokenType : undefined,
+      username: channelLogin,
+      providerUserId: channelId,
+      obtainedAt: Date.now(),
+    };
+
+    if (convexClient) {
+      await (convexClient as any).mutation("ingestion/tokens:upsertTokens", payload);
+    } else {
+      await fetchMutation(api.ingestion.tokens.storeTokensFromServer, {
+        ...payload,
+        secret: workspaceSecret,
+      });
+    }
+  } catch (error) {
+    console.error("[workspace] Unable to persist Twitch credentials", error);
   }
 }
