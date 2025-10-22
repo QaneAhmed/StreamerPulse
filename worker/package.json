@@ -1,0 +1,21 @@
+{
+  "name": "streamerpulse-worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^2.0.52",
+    "ai": "^5.0.75",
+    "convex": "^1.28.0",
+    "dotenv": "^16.4.5",
+    "sentiment": "^5.0.2",
+    "tmi.js": "^1.8.5",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.6",
+    "typescript": "^5"
+  }
+}

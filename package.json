@@ -7,7 +7,7 @@
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
     "start": "next start",
-    "ingest:twitch": "tsx scripts/twitch-ingest.ts",
+    "ingest:twitch": "tsx worker/src/index.ts",
     "simulate:chatters": "node scripts/simulate-chatters.mjs",
     "deploy:prod": "CONVEX_DEPLOYMENT=prod:scrupulous-mandrill-560 npx convex deploy",
     "deploy:dev": "CONVEX_DEPLOYMENT=dev:scrupulous-mandrill-560 npx convex deploy"

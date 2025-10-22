@@ -66,13 +66,13 @@ Document additional keys in `.env.example` if new integrations are added later.
 5. Trigger a deploy; verify logs complete without errors.
 
 ## 6. Railway ingestion worker
-1. Add a second service in the same project from the same repo.
-2. Build command: `npm run build`
+1. Add a second service in the same project from the same repo and set the **Root Directory** to `worker`.
+2. Build command: `npm install`
 3. Start command:
    ```bash
-   npm run ingest:twitch -- --live-feed-url=https://<your-app>.up.railway.app/api/live-feed
+   npm run start -- --live-feed-url=https://<your-app>.up.railway.app/api/live-feed
    ```
-4. Copy the environment variables from the app service.
+4. Copy the environment variables from the app service (the worker expects the same Convex, Clerk, Twitch, and LIVE_FEED_* values).
 5. Confirm the worker stays healthy and logs channel ingestion.
 
 ## 7. OAuth provider updates

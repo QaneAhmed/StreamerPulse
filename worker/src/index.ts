@@ -1,30 +1,35 @@
 #!/usr/bin/env tsx
 
 import { config as loadEnv } from "dotenv";
-
-loadEnv({ path: ".env.local" });
-loadEnv();
 import { spawn } from "child_process";
 import { createHash, randomUUID } from "crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { generateObject } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { z } from "zod";
 import tmi from "tmi.js";
 import Sentiment from "sentiment";
 import { ConvexHttpClient } from "convex/browser";
-import { internal } from "../convex/_generated/api";
-import type { Id } from "../convex/_generated/dataModel";
+import { internal } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import {
   buildMoodAnalysisUserPrompt,
   moodAnalysisSystemPrompt,
   type MoodPromptMessage,
   type MoodAnalysisContext,
-} from "../src/lib/ai/prompts";
+} from "../../src/lib/ai/prompts";
 import {
   classifyChatTone,
   type ChatTone,
   type ChatToneResult,
-} from "../src/lib/ai/chat-tone";
+} from "../../src/lib/ai/chat-tone";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+loadEnv({ path: path.resolve(__dirname, "../../.env.local") });
+loadEnv();
 
 type TokenRow = {
   name: string;
