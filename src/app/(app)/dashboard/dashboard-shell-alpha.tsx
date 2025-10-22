@@ -188,6 +188,7 @@ type DashboardShellAlphaProps = {
   initialState?: Partial<LiveState>;
   initialIngestionConnected?: boolean;
   channelLogin?: string | null;
+  viewerId?: string | null;
 };
 
 function createInitialState(overrides?: Partial<LiveState>): LiveState {
@@ -226,6 +227,7 @@ export default function DashboardShellAlpha({
   initialState: initialOverrides,
   initialIngestionConnected,
   channelLogin,
+  viewerId,
 }: DashboardShellAlphaProps) {
   const [state, setState] = useState<LiveState>(() => createInitialState(initialOverrides));
   const [ingestionConnected, setIngestionConnected] = useState<boolean>(() => {

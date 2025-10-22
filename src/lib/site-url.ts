@@ -17,9 +17,14 @@ const CANDIDATE_ENV_VARS = [
 
 type ResolveOptions = {
   headers?: Headers;
+  nextUrlOrigin?: string;
 };
 
 export function resolveSiteUrl(options: ResolveOptions = {}): string {
+  if (options.nextUrlOrigin) {
+    return normalize(options.nextUrlOrigin);
+  }
+
   const envUrl = coalesceEnvUrl();
   if (envUrl) {
     return envUrl;

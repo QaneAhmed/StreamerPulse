@@ -10,9 +10,18 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.next();
   }
 
+  if (
+    url.pathname.startsWith("/sign-in") ||
+    url.pathname.startsWith("/sign-up") ||
+    url.searchParams.has("__clerk_db_jwt") ||
+    url.searchParams.has("__clerk_redirect_url")
+  ) {
+    return NextResponse.next();
+  }
+
   const authResult = await auth();
   if (!authResult.userId) {
-    const siteUrl = resolveSiteUrl({ headers: req.headers });
+    const siteUrl = resolveSiteUrl({ headers: req.headers, nextUrlOrigin: req.nextUrl.origin });
     const redirectPath = `${url.pathname}${url.search}`;
     const redirectParam = encodeURIComponent(redirectPath);
     const destination = `${siteUrl}/sign-in?redirect_url=${redirectParam}`;

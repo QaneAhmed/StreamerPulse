@@ -75,6 +75,7 @@ export default async function DashboardPage() {
       initialState={initialState}
       initialIngestionConnected={initialIngestionConnected}
       channelLogin={channelLogin}
+      viewerId={userId ?? null}
     />
   );
 }

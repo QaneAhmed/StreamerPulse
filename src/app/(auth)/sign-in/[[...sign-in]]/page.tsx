@@ -8,16 +8,31 @@ import { resolveSiteUrl } from "@/lib/site-url";
 export default function SignInPage() {
   const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
   const searchParams = useSearchParams();
+  const siteOrigin = resolveSiteUrl();
+  const redirectParam = searchParams?.get("redirect_url");
 
-  const redirectUrl = useMemo(() => {
-    const siteUrl = resolveSiteUrl();
-    const raw = searchParams?.get("redirect_url") ?? "/dashboard/connect";
-    if (raw.startsWith("http://") || raw.startsWith("https://")) {
-      return raw;
+  const redirectTarget = useMemo(() => {
+    const fallback = "/dashboard";
+    if (!redirectParam) {
+      return fallback;
     }
-    const normalized = raw.startsWith("/") ? raw : `/${raw}`;
-    return `${siteUrl}${normalized}`;
-  }, [searchParams]);
+
+    if (redirectParam.startsWith("/")) {
+      return redirectParam;
+    }
+
+    try {
+      const parsed = new URL(redirectParam, siteOrigin);
+      if (parsed.origin !== siteOrigin) {
+        return fallback;
+      }
+
+      const relativePath = `${parsed.pathname}${parsed.search}${parsed.hash}` || "/";
+      return relativePath || fallback;
+    } catch {
+      return fallback;
+    }
+  }, [redirectParam, siteOrigin]);
 
   if (!publishableKey) {
     return (
@@ -55,8 +70,8 @@ export default function SignInPage() {
         <SignIn
           routing="path"
           path="/sign-in"
-          redirectUrl={redirectUrl}
-          forceRedirectUrl={redirectUrl}
+          redirectUrl={redirectTarget}
+          forceRedirectUrl={redirectTarget}
           appearance={{
             elements: {
               formButtonPrimary:

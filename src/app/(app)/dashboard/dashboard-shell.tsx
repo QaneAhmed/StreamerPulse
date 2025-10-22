@@ -246,6 +246,7 @@ type DashboardShellProps = {
   initialState?: Partial<LiveState>;
   initialIngestionConnected?: boolean;
   channelLogin?: string | null;
+  viewerId?: string | null;
 };
 
 const timeFormatter = new Intl.DateTimeFormat(undefined, {
@@ -442,6 +443,7 @@ export default function DashboardShell({
   initialState: initialOverrides,
   initialIngestionConnected,
   channelLogin,
+  viewerId,
 }: DashboardShellProps) {
   const [state, setState] = useState<LiveState>(() => createInitialState(initialOverrides));
   const [ingestionConnected, setIngestionConnected] = useState<boolean>(() => {
