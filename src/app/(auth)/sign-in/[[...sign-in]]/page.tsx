@@ -11,26 +11,31 @@ export default function SignInPage() {
   const siteOrigin = resolveSiteUrl();
   const redirectParam = searchParams?.get("redirect_url");
 
-  const redirectTarget = useMemo(() => {
+  const { relative: redirectRelative, absolute: redirectAbsolute } = useMemo(() => {
     const fallback = "/dashboard";
     if (!redirectParam) {
-      return fallback;
+      const absoluteFallback = `${siteOrigin}${fallback}`;
+      return { relative: fallback, absolute: absoluteFallback };
     }
 
     if (redirectParam.startsWith("/")) {
-      return redirectParam;
+      const relativeValue = redirectParam === "/" ? fallback : redirectParam;
+      return { relative: relativeValue, absolute: `${siteOrigin}${relativeValue}` };
     }
 
     try {
       const parsed = new URL(redirectParam, siteOrigin);
       if (parsed.origin !== siteOrigin) {
-        return fallback;
+        const absoluteFallback = `${siteOrigin}${fallback}`;
+        return { relative: fallback, absolute: absoluteFallback };
       }
 
       const relativePath = `${parsed.pathname}${parsed.search}${parsed.hash}` || "/";
-      return relativePath || fallback;
+      const normalizedRelative = relativePath === "/" ? fallback : relativePath;
+      return { relative: normalizedRelative, absolute: `${siteOrigin}${normalizedRelative}` };
     } catch {
-      return fallback;
+      const absoluteFallback = `${siteOrigin}${fallback}`;
+      return { relative: fallback, absolute: absoluteFallback };
     }
   }, [redirectParam, siteOrigin]);
 
@@ -70,8 +75,9 @@ export default function SignInPage() {
         <SignIn
           routing="path"
           path="/sign-in"
-          redirectUrl={redirectTarget}
-          forceRedirectUrl={redirectTarget}
+          afterSignInUrl={redirectRelative}
+          redirectUrl={redirectAbsolute}
+          forceRedirectUrl={redirectAbsolute}
           appearance={{
             elements: {
               formButtonPrimary:

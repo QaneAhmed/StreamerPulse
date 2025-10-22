@@ -82,6 +82,13 @@ type MessageRecord = {
   toneConfidence: number;
 };
 
+type CliOptions = {
+  liveFeedUrl?: string;
+  liveFeedOrigin?: string;
+};
+
+const cliOptions = parseCliOptions(process.argv.slice(2));
+
 const GLOBAL_TWITCH_EMOTES = new Set(
   [
     ":)", ":(", ":D", ":O", ":P", ":Z", ":\\", ":|", ":/", ":o", ":p", ":z", ">(", ";)", "<3",
@@ -599,12 +606,19 @@ const convexAdminIdentity = process.env.CONVEX_ADMIN_IDENTITY
   ? JSON.parse(process.env.CONVEX_ADMIN_IDENTITY)
   : undefined;
 function resolveLiveFeedUrl() {
+  if (cliOptions.liveFeedUrl) {
+    return normalizeUrl(cliOptions.liveFeedUrl);
+  }
+  if (cliOptions.liveFeedOrigin) {
+    return `${normalizeOrigin(cliOptions.liveFeedOrigin)}/api/live-feed`;
+  }
+
   const explicitUrl = coalesceString([
     process.env.LIVE_FEED_URL,
     process.env.NEXT_PUBLIC_LIVE_FEED_URL,
   ]);
   if (explicitUrl) {
-    return explicitUrl;
+    return normalizeUrl(explicitUrl);
   }
 
   const origin = coalesceString([
@@ -618,15 +632,16 @@ function resolveLiveFeedUrl() {
     process.env.PUBLIC_URL,
     process.env.URL,
     process.env.RENDER_EXTERNAL_URL,
-    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    process.env.VERCEL_BRANCH_URL,
+    process.env.VERCEL_URL,
   ]);
 
   if (origin) {
-    const normalizedOrigin = origin.replace(/\/?$/, "");
-    return `${normalizedOrigin}/api/live-feed`;
+    return `${normalizeOrigin(origin)}/api/live-feed`;
   }
 
-  return "http://localhost:3000/api/live-feed";
+  return LIVE_FEED_FALLBACK_URL;
 }
 
 function coalesceString(candidates: Array<string | undefined>): string | undefined {
@@ -638,7 +653,62 @@ function coalesceString(candidates: Array<string | undefined>): string | undefin
   return undefined;
 }
 
+function normalizeUrl(value: string): string {
+  const withScheme =
+    value.startsWith("http://") || value.startsWith("https://") ? value : `https://${value}`;
+  const url = new URL(withScheme);
+  return url.toString().replace(/\/$/, "");
+}
+
+function normalizeOrigin(value: string): string {
+  try {
+    const normalized = value.startsWith("http") ? value : `https://${value}`;
+    const url = new URL(normalized);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return value.replace(/\/?$/, "");
+  }
+}
+
+function parseCliOptions(args: string[]): CliOptions {
+  const options: CliOptions = {};
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--live-feed-url") {
+      const next = args[index + 1];
+      if (next && !next.startsWith("--")) {
+        options.liveFeedUrl = next;
+        index += 1;
+      }
+      continue;
+    }
+    if (arg.startsWith("--live-feed-url=")) {
+      options.liveFeedUrl = arg.split("=", 2)[1];
+      continue;
+    }
+    if (arg === "--live-feed-origin") {
+      const next = args[index + 1];
+      if (next && !next.startsWith("--")) {
+        options.liveFeedOrigin = next;
+        index += 1;
+      }
+      continue;
+    }
+    if (arg.startsWith("--live-feed-origin=")) {
+      options.liveFeedOrigin = arg.split("=", 2)[1];
+    }
+  }
+  return options;
+}
+
+const LIVE_FEED_FALLBACK_URL = "http://localhost:3000/api/live-feed";
 const liveFeedUrl = resolveLiveFeedUrl();
+
+if (liveFeedUrl === LIVE_FEED_FALLBACK_URL) {
+  console.warn(
+    "[live-feed] Using localhost fallback URL. Start `npm run dev` or set LIVE_FEED_URL / LIVE_FEED_ORIGIN (or pass --live-feed-url) to target your deployed dashboard."
+  );
+}
 
 let tokenExpiry = Date.now() + 3 * 60 * 60 * 1000;
 let moodAiCooldownUntil = 0;

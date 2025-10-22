@@ -12,6 +12,8 @@ environment variables before starting the worker:
 export LIVE_FEED_URL="https://your-domain.com/api/live-feed"
 # or
 export LIVE_FEED_ORIGIN="https://your-domain.com"
+# or pass a CLI flag:
+npm run ingest:twitch -- --live-feed-url=https://your-domain.com/api/live-feed
 ```
 
 If neither variable is set the worker falls back to
