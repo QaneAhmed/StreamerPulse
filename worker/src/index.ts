@@ -776,9 +776,17 @@ async function resolveIntegrationsList(convex: ConvexHttpClient): Promise<Channe
 
   if (explicitChannelFilter && explicitChannelFilter.length > 0) {
     const allow = new Set(explicitChannelFilter.map((login) => login.toLowerCase()));
-    filtered = filtered.filter((integration) =>
+    const prefiltered = filtered.filter((integration) =>
       allow.has(integration.channelLogin.toLowerCase())
     );
+
+    if (prefiltered.length === 0 && filtered.length > 0) {
+      console.warn(
+        "[ingestion] Ignoring TWITCH_CHANNELS filter because none of the linked integrations matched. Ingesting all linked channels instead."
+      );
+    } else {
+      filtered = prefiltered;
+    }
   }
 
   if (filtered.length === 0 && explicitChannel) {
