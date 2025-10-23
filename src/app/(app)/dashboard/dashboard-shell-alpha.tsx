@@ -240,6 +240,8 @@ export default function DashboardShellAlpha({
 
   useEffect(() => {
     if (typeof initialIngestionConnected === "boolean") {
+      // Keep the local connection flag in sync with server-provided status.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIngestionConnected(initialIngestionConnected);
     }
   }, [initialIngestionConnected]);
@@ -498,7 +500,7 @@ export default function DashboardShellAlpha({
         <h1 className="text-3xl font-semibold tracking-tight">Live Dashboard</h1>
         <p className="max-w-2xl text-sm text-slate-400">
           Once your Twitch channel is connected you can start a monitoring session and
-          watch StreamLens compute message velocity, sentiment, spikes, and top emotes in
+          watch StreamerPulse compute message velocity, sentiment, spikes, and top emotes in
           near real time. Finish onboarding in Settings to enable ingestion.
         </p>
       </section>

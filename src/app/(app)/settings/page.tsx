@@ -64,7 +64,7 @@ export default async function SettingsPage() {
       <section className="flex flex-col gap-3">
         <h1 className="text-3xl font-semibold tracking-tight">Workspace Settings</h1>
         <p className="max-w-2xl text-sm text-slate-400">
-          Manage your StreamLens workspace details, Twitch integration, and retention
+          Manage your StreamerPulse workspace details, Twitch integration, and retention
           policies. These panels are scaffolding for the full configuration flow.
         </p>
       </section>

@@ -19,10 +19,10 @@ export default function AppHeader() {
     <header className="flex h-16 items-center gap-4 border-b border-slate-800 bg-slate-900/60 px-6 backdrop-blur lg:px-12">
       <Link href="/dashboard" className="flex items-center gap-2 text-sm font-semibold">
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-violet-500/20 text-violet-300">
-          SL
+          SP
         </span>
         <span className="flex items-center gap-2">
-          StreamLens
+          StreamerPulse
           <span className="rounded-full border border-violet-500/40 bg-violet-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.25em] text-violet-200">
             Beta
           </span>

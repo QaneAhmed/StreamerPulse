@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "StreamLens",
+  title: "StreamerPulse",
   description:
     "Real-time Twitch chat analytics for streamers. Built with StreamerPulse.",
 };

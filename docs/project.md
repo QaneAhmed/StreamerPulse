@@ -2,7 +2,7 @@ Absolutely. Here’s a **lean, implementation-agnostic PRD** your developer can 
 
 ---
 
-# StreamLens — MVP PRD (Developer-Choice Edition)
+# StreamerPulse — MVP PRD (Developer-Choice Edition)
 
 **Owner:** Qane Ahmed
 **Date:** Oct 13, 2025

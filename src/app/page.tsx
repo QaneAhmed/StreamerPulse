@@ -21,7 +21,7 @@ export default async function HomePage() {
           Real-time Twitch chat intelligence for streamers.
         </h1>
         <p className="text-base text-slate-300">
-          StreamLens surfaces message velocity, sentiment, spikes, and top
+          StreamerPulse surfaces message velocity, sentiment, spikes, and top
           emotes in under two seconds so you can react live. Connect with Twitch
           to start your beta workspace.
         </p>

@@ -1129,10 +1129,15 @@ export default function DashboardShell({
     [
       state.chat,
       state.session.startedAt,
+      state.session.status,
+      state.metrics.baseline.messageRate,
+      state.metrics.baseline.uniqueChatters,
+      state.metrics.baseline.newcomers,
       derived.messageRate,
       derived.uniqueChatters,
       derived.newcomers,
       derived.sentiment,
+      derived.sentimentMeta.label,
       derived.trendPercent,
       derived.toneSummary,
     ]
