@@ -11,7 +11,7 @@ import { z } from "zod";
 import tmi from "tmi.js";
 import Sentiment from "sentiment";
 import { ConvexHttpClient } from "convex/browser";
-import { internal } from "../../convex/_generated/api";
+import { internal } from "../../convex/_generated/api.js";
 import type { Id } from "../../convex/_generated/dataModel";
 import {
   buildMoodAnalysisUserPrompt,
