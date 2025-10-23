@@ -6,8 +6,8 @@ import {
 } from "../_generated/server";
 import type { MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import type { FunctionReference } from "convex/server";
 import { v } from "convex/values";
+import { internal } from "../_generated/api";
 
 type RefreshResponse = {
   accessToken: string;
@@ -139,7 +139,7 @@ export const leaseCredentials = internalAction({
   },
   handler: async (ctx, args) => {
     const integration = (await ctx.runQuery(
-      getIntegrationByLogin as unknown as FunctionReference<"query", "internal">,
+      internal.ingestion.tokens.getIntegrationByLogin,
       {
         channelLogin: args.channelLogin,
       }
@@ -150,7 +150,7 @@ export const leaseCredentials = internalAction({
     }
 
     let tokens = (await ctx.runQuery(
-      getTokensByIntegration as unknown as FunctionReference<"query", "internal">,
+      internal.ingestion.tokens.getTokensByIntegration,
       {
         integrationId: integration._id,
       }
@@ -173,7 +173,7 @@ export const leaseCredentials = internalAction({
 
     if (needsRefresh) {
       const refreshed = await refreshTwitchToken(tokens.refreshToken);
-      tokens = (await ctx.runMutation(upsertTokens as unknown as FunctionReference<"mutation", "internal">, {
+      tokens = (await ctx.runMutation(internal.ingestion.tokens.upsertTokens, {
         integrationId: integration._id,
         accessToken: refreshed.accessToken,
         refreshToken: refreshed.refreshToken,
