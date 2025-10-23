@@ -78,6 +78,13 @@ export default function SignInPage() {
           afterSignInUrl={redirectRelative}
           redirectUrl={redirectAbsolute}
           forceRedirectUrl={redirectAbsolute}
+          localization={{
+            signIn: {
+              start: {
+                title: "Sign in to StreamLens",
+              },
+            },
+          }}
           appearance={{
             elements: {
               formButtonPrimary:
