@@ -67,7 +67,7 @@ Document additional keys in `.env.example` if new integrations are added later.
 
 ## 6. Railway ingestion worker
 1. Add a second service in the same project from the same repo and set the **Root Directory** to `worker`.
-2. Build command: `npm install`
+2. Build command: `npm run build`
 3. Start command:
    ```bash
    npm run start -- --live-feed-url=https://<your-app>.up.railway.app/api/live-feed
