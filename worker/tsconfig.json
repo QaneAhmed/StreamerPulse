@@ -8,6 +8,7 @@
     "types": ["node"],
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true,
     "baseUrl": "../",
     "incremental": false,
     "noEmit": true

@@ -18,12 +18,12 @@ import {
   moodAnalysisSystemPrompt,
   type MoodPromptMessage,
   type MoodAnalysisContext,
-} from "../../src/lib/ai/prompts";
+} from "../../src/lib/ai/prompts.ts";
 import {
   classifyChatTone,
   type ChatTone,
   type ChatToneResult,
-} from "../../src/lib/ai/chat-tone";
+} from "../../src/lib/ai/chat-tone.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
