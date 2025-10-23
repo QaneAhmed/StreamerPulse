@@ -753,13 +753,22 @@ const explicitChannelFilter =
   parseChannelList(process.env.TWITCH_CHANNELS ?? process.env.TWITCH_CHANNEL_ALLOWLIST) ?? null;
 
 async function resolveIntegrationsList(convex: ConvexHttpClient): Promise<ChannelIntegration[]> {
-  const raw = await (convex as any).query("ingestion/getActiveChannels:getActiveChannels", {});
+  const raw = await (convex as any).query(
+    internal.ingestion.tokens.listActiveIntegrations,
+    {}
+  );
+
   const channelList: ChannelIntegration[] = (Array.isArray(raw) ? raw : []).map(
     (integration: any) => ({
-      channelLogin: (integration.channelLogin as string) ?? "",
+      channelLogin: typeof integration.channelLogin === "string" ? integration.channelLogin : "",
       channelDisplayName:
-        (integration.channelDisplayName as string) ?? integration.channelLogin ?? "",
-      channelId: (integration.channelId as string) ?? integration.channelLogin ?? "",
+        typeof integration.channelDisplayName === "string"
+          ? integration.channelDisplayName
+          : integration.channelLogin ?? "",
+      channelId:
+        typeof integration.channelId === "string"
+          ? integration.channelId
+          : integration.channelLogin ?? "",
     })
   );
 

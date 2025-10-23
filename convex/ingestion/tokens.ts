@@ -198,6 +198,45 @@ export const leaseCredentials = internalAction({
   },
 });
 
+export const listActiveIntegrations = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const integrations = await ctx.db.query("integrations").collect();
+    const active = [] as Array<{
+      integrationId: Id<"integrations">;
+      workspaceId: Id<"workspaces">;
+      channelId: string;
+      channelLogin: string;
+      channelDisplayName: string;
+    }>;
+
+    for (const integration of integrations) {
+      if (integration.status !== "connected") {
+        continue;
+      }
+
+      const tokens = await ctx.db
+        .query("integrationTokens")
+        .withIndex("by_integration", (q) => q.eq("integrationId", integration._id))
+        .first();
+
+      if (!tokens) {
+        continue;
+      }
+
+      active.push({
+        integrationId: integration._id,
+        workspaceId: integration.workspaceId,
+        channelId: integration.channelId,
+        channelLogin: integration.channelLogin,
+        channelDisplayName: integration.channelDisplayName,
+      });
+    }
+
+    return active;
+  },
+});
+
 async function refreshTwitchToken(refreshToken: string): Promise<RefreshResponse> {
   const clientId = process.env.TWITCH_CLIENT_ID;
   const clientSecret = process.env.TWITCH_CLIENT_SECRET;
