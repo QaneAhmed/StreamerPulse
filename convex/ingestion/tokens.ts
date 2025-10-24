@@ -127,8 +127,11 @@ export const storeTokensFromServer = mutation({
     if (expectedSecret && args.secret !== expectedSecret) {
       throw new Error("Unauthorized token store request");
     }
-    const { secret: _ignored, ...rest } = args;
-    return upsertTokensInternal(ctx, rest);
+    const { secret: _ignored, refreshToken, ...rest } = args;
+    return upsertTokensInternal(ctx, {
+      ...rest,
+      refreshToken: refreshToken ?? null,
+    });
   },
 });
 
@@ -180,7 +183,7 @@ export const leaseCredentials = internalAction({
       tokens = (await ctx.runMutation(internal.ingestion.tokens.upsertTokens, {
         integrationId: integration._id,
         accessToken: refreshed.accessToken,
-        refreshToken: refreshed.refreshToken,
+        refreshToken: refreshed.refreshToken ?? refreshToken,
         expiresAt: now + refreshed.expiresIn * 1000,
         scope: refreshed.scope,
         tokenType: refreshed.tokenType,
