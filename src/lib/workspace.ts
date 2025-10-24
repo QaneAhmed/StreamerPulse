@@ -179,6 +179,7 @@ async function storeChannelTokens({
       console.warn("[workspace] No Twitch OAuth tokens available from Clerk", {
         userId: user.id,
         channelLogin,
+        providerCandidates,
       });
       return;
     }
@@ -197,6 +198,9 @@ async function storeChannelTokens({
       console.warn("[workspace] Missing access or refresh token from Clerk payload", {
         userId: user.id,
         channelLogin,
+        hasAccessToken: Boolean(accessToken),
+        hasRefreshToken: Boolean(refreshToken),
+        provider: primary?.provider,
       });
       return;
     }
@@ -246,6 +250,12 @@ async function storeChannelTokens({
         secret: workspaceSecret,
       });
     }
+    console.info("[workspace] Stored Twitch credentials for channel", {
+      userId: user.id,
+      channelLogin,
+      integrationId,
+      via: convexClient ? "convex-admin" : "public-mutation",
+    });
   } catch (error) {
     console.error("[workspace] Unable to persist Twitch credentials", error);
   }
