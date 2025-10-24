@@ -170,8 +170,19 @@ async function storeChannelTokens({
     for (const provider of providerCandidates) {
       try {
         const fetched = await client.users.getUserOauthAccessToken(user.id, provider as any);
-        if (Array.isArray(fetched) && fetched.length > 0) {
-          tokens = fetched;
+        const items = Array.isArray(fetched)
+          ? fetched
+          : (fetched as any)?.data && Array.isArray((fetched as any).data)
+            ? (fetched as any).data
+            : [];
+        console.info("[workspace] OAuth token fetch", {
+          provider,
+          isArray: Array.isArray(fetched),
+          hasDataArray: Array.isArray((fetched as any)?.data),
+          count: items.length,
+        });
+        if (items.length > 0) {
+          tokens = items as any;
           break;
         }
       } catch (error) {
