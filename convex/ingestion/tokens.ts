@@ -172,7 +172,11 @@ export const leaseCredentials = internalAction({
         expiresAt - now <= REFRESH_MARGIN_MS);
 
     if (needsRefresh) {
-      const refreshed = await refreshTwitchToken(tokens.refreshToken);
+      const refreshToken = tokens.refreshToken;
+      if (!refreshToken) {
+        throw new Error("Refresh requested but no refresh token is stored");
+      }
+      const refreshed = await refreshTwitchToken(refreshToken);
       tokens = (await ctx.runMutation(internal.ingestion.tokens.upsertTokens, {
         integrationId: integration._id,
         accessToken: refreshed.accessToken,
