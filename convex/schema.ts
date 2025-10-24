@@ -162,7 +162,7 @@ export default defineSchema({
   integrationTokens: defineTable({
     integrationId: v.id("integrations"),
     accessToken: v.string(),
-    refreshToken: v.string(),
+    refreshToken: v.optional(v.string()),
     tokenType: v.optional(v.string()),
     scope: v.optional(v.array(v.string())),
     expiresAt: v.optional(v.number()),

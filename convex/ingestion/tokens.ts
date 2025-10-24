@@ -22,7 +22,7 @@ const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 type TokenUpsertArgs = {
   integrationId: Id<"integrations">;
   accessToken: string;
-  refreshToken: string;
+  refreshToken?: string | null;
   expiresAt?: number;
   scope?: string[];
   tokenType?: string;
@@ -40,7 +40,7 @@ async function upsertTokensInternal(ctx: MutationCtx, args: TokenUpsertArgs) {
   const payload = {
     integrationId: args.integrationId,
     accessToken: args.accessToken,
-    refreshToken: args.refreshToken,
+    refreshToken: args.refreshToken ?? undefined,
     expiresAt: args.expiresAt,
     scope: args.scope,
     tokenType: args.tokenType,
@@ -98,7 +98,7 @@ export const upsertTokens = internalMutation({
   args: {
     integrationId: v.id("integrations"),
     accessToken: v.string(),
-    refreshToken: v.string(),
+    refreshToken: v.optional(v.string()),
     expiresAt: v.optional(v.number()),
     scope: v.optional(v.array(v.string())),
     tokenType: v.optional(v.string()),
@@ -113,7 +113,7 @@ export const storeTokensFromServer = mutation({
   args: {
     integrationId: v.id("integrations"),
     accessToken: v.string(),
-    refreshToken: v.string(),
+    refreshToken: v.optional(v.string()),
     expiresAt: v.optional(v.number()),
     scope: v.optional(v.array(v.string())),
     tokenType: v.optional(v.string()),
@@ -191,7 +191,7 @@ export const leaseCredentials = internalAction({
       channelDisplayName: integration.channelDisplayName,
       channelId: integration.channelId,
       accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
+      refreshToken: tokens.refreshToken ?? null,
       expiresAt: tokens.expiresAt ?? null,
       username: tokens.username ?? integration.channelLogin,
     };

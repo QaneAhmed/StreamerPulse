@@ -727,7 +727,7 @@ type CredentialLease = {
   channelDisplayName: string;
   channelId: string;
   accessToken: string;
-  refreshToken: string;
+  refreshToken: string | null;
   expiresAt: number | null;
   username: string;
 };
@@ -1045,7 +1045,7 @@ async function runSingleChannelIngest() {
   const twitchChannel = integration.channelLogin.toLowerCase();
   const initialLease = await leaseChannelCredentials(convex, twitchChannel);
   let userAccessToken = initialLease.accessToken;
-  let userRefreshToken = initialLease.refreshToken;
+  let userRefreshToken: string | null = initialLease.refreshToken ?? null;
   let tokenExpiry = initialLease.expiresAt ?? Date.now() + 60 * 60 * 1000;
   let moodAiCooldownUntil = 0;
   let moodAiCooldownLogged = false;
@@ -1077,7 +1077,7 @@ async function runSingleChannelIngest() {
 
     const refreshed = await leaseChannelCredentials(convex, twitchChannel, true);
     userAccessToken = refreshed.accessToken;
-    userRefreshToken = refreshed.refreshToken;
+    userRefreshToken = refreshed.refreshToken ?? null;
     tokenExpiry = refreshed.expiresAt ?? Date.now() + 60 * 60 * 1000;
     authMode = userAccessToken ? "oauth" : "anonymous";
   }

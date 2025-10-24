@@ -209,15 +209,21 @@ async function storeChannelTokens({
     const refreshToken =
       typeof primary?.refreshToken === "string" ? primary.refreshToken : null;
 
-    if (!accessToken || !refreshToken) {
-      console.warn("[workspace] Missing access or refresh token from Clerk payload", {
+    if (!accessToken) {
+      console.warn("[workspace] Missing access token from Clerk payload", {
         userId: user.id,
         channelLogin,
-        hasAccessToken: Boolean(accessToken),
-        hasRefreshToken: Boolean(refreshToken),
         provider: primary?.provider,
       });
       return;
+    }
+
+    if (!refreshToken) {
+      console.warn("[workspace] No refresh token provided by Clerk; ingestion will not auto-refresh", {
+        userId: user.id,
+        channelLogin,
+        provider: primary?.provider,
+      });
     }
 
     let expiresAt: number | undefined;
@@ -248,7 +254,7 @@ async function storeChannelTokens({
     const payload = {
       integrationId: integrationIdRef,
       accessToken,
-      refreshToken,
+        refreshToken: refreshToken ?? undefined,
       expiresAt,
       scope,
       tokenType: typeof primary?.tokenType === "string" ? primary.tokenType : undefined,
