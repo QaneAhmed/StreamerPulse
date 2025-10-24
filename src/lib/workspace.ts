@@ -148,6 +148,10 @@ async function storeChannelTokens({
 }: StoreTokenArgs) {
   try {
     const client = await clerkClient();
+    const secretPreview = process.env.CLERK_SECRET_KEY
+      ? `${process.env.CLERK_SECRET_KEY.slice(0, 8)}…`
+      : undefined;
+    console.info("[workspace] Clerk secret preview", { secretPreview });
     let tokens:
       | Array<{
           token?: string;
