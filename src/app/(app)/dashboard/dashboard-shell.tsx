@@ -103,6 +103,7 @@ type LiveUpdate =
         status: SessionStatus;
         channel?: string | null;
         startedAt?: number | null;
+        ingestionConnected?: boolean;
       };
     }
   | {
@@ -710,7 +711,11 @@ export default function DashboardShell({
           const update = JSON.parse(event.data) as LiveUpdate;
           handleUpdate(update);
           if (update.type === "session") {
-            setIngestionConnected(update.payload.status === "listening");
+            const connected =
+              typeof update.payload.ingestionConnected === "boolean"
+                ? update.payload.ingestionConnected
+                : update.payload.status === "listening";
+            setIngestionConnected(connected);
           }
         } catch (error) {
           console.warn("Failed to parse live update", error);

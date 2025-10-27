@@ -1401,6 +1401,7 @@ async function runSingleChannelIngest() {
           channel: channelDisplayName,
           channelLogin: twitchChannel,
           startedAt: now,
+          ingestionConnected: true,
         },
       });
     } catch (error) {
@@ -1416,7 +1417,11 @@ async function runSingleChannelIngest() {
     }
   }
 
-  async function endIngestionSession(endedAt: number | null = null) {
+  async function endIngestionSession(
+    endedAt: number | null = null,
+    options?: { ingestionConnected?: boolean }
+  ) {
+    const ingestionConnected = options?.ingestionConnected ?? true;
     if (!activeStreamId) {
       aggregator.reset();
       pendingMessages = [];
@@ -1430,6 +1435,7 @@ async function runSingleChannelIngest() {
           channel: channelDisplayName,
           channelLogin: twitchChannel,
           startedAt: null,
+          ingestionConnected,
         },
       });
       return;
@@ -1459,6 +1465,7 @@ async function runSingleChannelIngest() {
         channel: channelDisplayName,
         channelLogin: twitchChannel,
         startedAt: null,
+        ingestionConnected,
       },
     });
   }
@@ -1467,12 +1474,17 @@ async function runSingleChannelIngest() {
     try {
       const isLive = await fetchStreamLive(twitchChannel);
 
+      const channelLabel = channelDisplayName ?? twitchChannel;
       if (isLive && !activeStreamId) {
         const now = Date.now();
-        console.log(`[twitch] Stream is live (detected via ${context}). Starting ingestion.`);
+        console.log(
+          `[twitch:${twitchChannel}] Channel ${channelLabel} is live (detected via ${context}). Starting ingestion.`
+        );
         await startIngestionSession(now);
       } else if (!isLive && activeStreamId) {
-        console.log(`[twitch] Stream went offline (detected via ${context}). Ending ingestion.`);
+        console.log(
+          `[twitch:${twitchChannel}] Channel ${channelLabel} went offline (detected via ${context}). Ending ingestion.`
+        );
         await endIngestionSession();
       } else if (isLive && lastReportedStatus !== "live") {
         lastReportedStatus = "live";
@@ -1485,6 +1497,7 @@ async function runSingleChannelIngest() {
             channel: channelDisplayName,
             channelLogin: twitchChannel,
             startedAt: sessionStartedAt,
+            ingestionConnected: true,
           },
         });
       } else if (!isLive && lastReportedStatus !== "offline") {
@@ -1500,6 +1513,7 @@ async function runSingleChannelIngest() {
             channel: channelDisplayName,
             channelLogin: twitchChannel,
             startedAt: null,
+            ingestionConnected: true,
           },
         });
       }
@@ -1519,6 +1533,20 @@ async function runSingleChannelIngest() {
           `[twitch] Connected to #${twitchChannel} (${describeAuthMode(authMode)} mode)`
         );
         await evaluateStreamStatus("connection");
+        if (!activeStreamId) {
+          await postLiveFeed(twitchChannel, {
+            type: "session",
+            channel: twitchChannel,
+            channelLogin: twitchChannel,
+            payload: {
+              status: "idle",
+              channel: channelDisplayName,
+              channelLogin: twitchChannel,
+              startedAt: sessionStartedAt,
+              ingestionConnected: true,
+            },
+          });
+        }
         if (statusPollTimer) {
           clearInterval(statusPollTimer);
         }
@@ -1554,7 +1582,7 @@ async function runSingleChannelIngest() {
         clearInterval(statusPollTimer);
         statusPollTimer = null;
       }
-      await endIngestionSession();
+      await endIngestionSession(null, { ingestionConnected: false });
     });
 
     instance.on("message", async (channelName: string, tags: Tags, message: string, self: boolean) => {
@@ -1788,7 +1816,7 @@ async function runSingleChannelIngest() {
     if (statusPollTimer) {
       clearInterval(statusPollTimer);
     }
-    await endIngestionSession();
+    await endIngestionSession(null, { ingestionConnected: false });
     process.exit(0);
   };
 
