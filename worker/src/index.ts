@@ -940,20 +940,13 @@ async function orchestrateMultiChannelIngestion() {
   const convex = new ConvexHttpClient(convexUrl);
   (convex as any).setAdminAuth?.(convexAdminKey, convexAdminIdentity);
 
-  const integrations = await resolveIntegrationsList(convex);
+  const activeChildren = new Map<string, ReturnType<typeof spawn>>();
 
-  if (integrations.length === 0) {
-    console.warn("[manager] No connected Twitch integrations found. Nothing to ingest.");
-    return;
-  }
-
-  console.log(
-    `[manager] Starting ingestion workers for ${integrations
-      .map((integration) => `#${integration.channelLogin}`)
-      .join(", ")}.`
-  );
-
-  const childProcesses = integrations.map((integration) => {
+  const startChild = (integration: ChannelIntegration) => {
+    if (activeChildren.has(integration.channelLogin)) {
+      return;
+    }
+    console.log(`[manager] Starting ingestion for #${integration.channelLogin}`);
     const childEnv: NodeJS.ProcessEnv = { ...process.env, INGEST_CHILD: "1" };
     childEnv.TWITCH_CHANNEL = integration.channelLogin;
     childEnv.TWITCH_CHANNEL_ID = integration.channelId;
@@ -964,8 +957,64 @@ async function orchestrateMultiChannelIngestion() {
       stdio: "inherit",
     });
 
-    return { process: child, integration };
-  });
+    activeChildren.set(integration.channelLogin, child);
+
+    child.once("exit", (code, signal) => {
+      console.log(
+        `[manager] Ingestion worker for #${integration.channelLogin} exited (code=${code}, signal=${signal ?? "none"}).`
+      );
+      activeChildren.delete(integration.channelLogin);
+    });
+
+    child.once("error", (error) => {
+      console.error(`[manager] Ingestion worker for #${integration.channelLogin} failed`, error);
+      activeChildren.delete(integration.channelLogin);
+    });
+  };
+
+  const stopChild = (channelLogin: string) => {
+    const child = activeChildren.get(channelLogin);
+    if (!child) {
+      return;
+    }
+    console.warn(`[manager] Stopping ingestion for #${channelLogin}`);
+    activeChildren.delete(channelLogin);
+    try {
+      child.kill("SIGTERM");
+    } catch (error) {
+      console.warn(`[manager] Failed to stop worker for #${channelLogin}`, error);
+    }
+  };
+
+  const refreshIntegrations = async () => {
+    const integrations = await resolveIntegrationsList(convex);
+    const activeLogins = new Set(activeChildren.keys());
+
+    const nextLogins = new Set<string>();
+
+    for (const integration of integrations) {
+      nextLogins.add(integration.channelLogin);
+      startChild(integration);
+    }
+
+    for (const login of activeLogins) {
+      if (!nextLogins.has(login)) {
+        stopChild(login);
+      }
+    }
+  };
+
+  await refreshIntegrations();
+
+  if (activeChildren.size === 0) {
+    console.warn("[manager] No connected Twitch integrations found. Waiting for sign-ins…");
+  }
+
+  const interval = setInterval(() => {
+    refreshIntegrations().catch((error) => {
+      console.error("[manager] Failed to refresh integrations", error);
+    });
+  }, 60_000);
 
   let shuttingDown = false;
 
@@ -974,14 +1023,13 @@ async function orchestrateMultiChannelIngestion() {
       return;
     }
     shuttingDown = true;
+    clearInterval(interval);
     console.warn(`[manager] Received ${signal}. Shutting down ingestion workers…`);
-    for (const { process: child } of childProcesses) {
-      if (!child.killed) {
-        try {
-          child.kill(signal);
-        } catch (error) {
-          console.warn("[manager] Failed to propagate signal to child", error);
-        }
+    for (const [login, child] of activeChildren) {
+      try {
+        child.kill(signal);
+      } catch (error) {
+        console.warn(`[manager] Failed to propagate signal to child #${login}`, error);
       }
     }
   };
@@ -989,22 +1037,14 @@ async function orchestrateMultiChannelIngestion() {
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
 
-  await Promise.all(
-    childProcesses.map(({ process: child, integration }) =>
-      new Promise<void>((resolve, reject) => {
-        child.once("error", (error) => {
-          console.error(`[manager] Ingestion worker for #${integration.channelLogin} failed`, error);
-          resolve();
-        });
-        child.once("exit", (code, signal) => {
-          console.log(
-            `[manager] Ingestion worker for #${integration.channelLogin} exited (code=${code}, signal=${signal ?? "none"}).`
-          );
-          resolve();
-        });
-      })
-    )
-  );
+  await new Promise<void>((resolve) => {
+    const checkInterval = setInterval(() => {
+      if (shuttingDown && activeChildren.size === 0) {
+        clearInterval(checkInterval);
+        resolve();
+      }
+    }, 1000);
+  });
 }
 
 async function leaseChannelCredentials(
