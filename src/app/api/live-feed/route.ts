@@ -16,6 +16,7 @@ type BroadcastEntry = {
 type ChannelState = {
   clients: Set<Writable>;
   history: BroadcastEntry[];
+  lastSession?: { timestamp: number; message: unknown };
 };
 
 const channels = new Map<string, ChannelState>();
@@ -51,10 +52,14 @@ function recordMessage(channel: string, message: unknown) {
     "type" in message &&
     typeof (message as { type: unknown }).type === "string"
   ) {
-    const type = (message as { type: string }).type;
     const state = getChannelState(channel);
+    const type = (message as { type: string }).type;
     if (type === "reset") {
       state.history.length = 0;
+      return;
+    }
+    if (type === "session") {
+      state.lastSession = { timestamp: Date.now(), message };
     }
     state.history.push({ timestamp: Date.now(), message });
     if (state.history.length > HISTORY_LIMIT) {
@@ -124,7 +129,12 @@ export async function GET(request: Request) {
   }
 
   if (!sessionSent) {
-    send({ type: "session", payload: { status: "idle", channel: null, startedAt: null } });
+    const lastSession = state.lastSession;
+    if (lastSession) {
+      send(lastSession.message);
+    } else {
+      send({ type: "session", payload: { status: "idle", channel: null, startedAt: null } });
+    }
   }
 
   return new Response(readable, {
