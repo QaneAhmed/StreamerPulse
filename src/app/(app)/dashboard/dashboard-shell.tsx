@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
 import AlertList from "./components/alert-list";
 import TrendList from "./components/trend-list";
 import type { ChatTone } from "@/lib/ai/chat-tone";
@@ -221,6 +220,8 @@ const initialState: LiveState = {
   moodAnalysis: null,
 };
 
+const DASHBOARD_STORAGE_KEY = "streamerpulse:dashboard-state";
+
 const MAX_TIMELINE_POINTS = 120;
 const MAX_CHAT_MESSAGES = 100;
 const MAX_EVENTS = 30;
@@ -424,6 +425,26 @@ function describeStatus(status: SessionStatus, ingestionConnected: boolean) {
   };
 }
 
+function computeEffectiveStatus(
+  session: LiveState["session"],
+  ingestionConnected: boolean,
+  chat: ChatMessage[]
+): SessionStatus {
+  if (session.status === "errored") {
+    return "errored";
+  }
+  if (session.status === "listening") {
+    return "listening";
+  }
+  if (session.startedAt) {
+    return "listening";
+  }
+  if (ingestionConnected && chat.length > 0) {
+    return "listening";
+  }
+  return session.status;
+}
+
 function formatEventTimestamp(timestamp: number) {
   const delta = Date.now() - timestamp;
   if (!Number.isFinite(delta) || delta < 0) {
@@ -446,8 +467,31 @@ export default function DashboardShell({
   channelLogin,
   viewerId,
 }: DashboardShellProps) {
-  const [state, setState] = useState<LiveState>(() => createInitialState(initialOverrides));
+  const [state, setState] = useState<LiveState>(() => {
+    const baseOverrides = initialOverrides ?? {};
+    if (typeof window === "undefined") {
+      return createInitialState(baseOverrides);
+    }
+
+    try {
+      const raw = window.sessionStorage.getItem(DASHBOARD_STORAGE_KEY);
+      if (raw) {
+        const persisted = JSON.parse(raw) as Partial<LiveState>;
+        return createInitialState({ ...baseOverrides, ...persisted });
+      }
+    } catch (error) {
+      console.warn("Failed to restore dashboard state from sessionStorage", error);
+    }
+
+    return createInitialState(baseOverrides);
+  });
   const [ingestionConnected, setIngestionConnected] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const stored = window.sessionStorage.getItem(`${DASHBOARD_STORAGE_KEY}:ingestion`);
+      if (stored === "true" || stored === "false") {
+        return stored === "true";
+      }
+    }
     if (typeof initialIngestionConnected === "boolean") {
       return initialIngestionConnected;
     }
@@ -455,6 +499,7 @@ export default function DashboardShell({
     return status === "listening";
   });
   const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
+  const effectiveStatus = computeEffectiveStatus(state.session, ingestionConnected, state.chat);
   const alertsFingerprintRef = useRef<string | null>(null);
   const alertsRef = useRef<DashboardAlert[]>(alerts);
   const alertsFetchInFlightRef = useRef(false);
@@ -472,13 +517,28 @@ export default function DashboardShell({
   }, [alerts]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(state));
+      window.sessionStorage.setItem(
+        `${DASHBOARD_STORAGE_KEY}:ingestion`,
+        ingestionConnected ? "true" : "false"
+      );
+    } catch (error) {
+      console.warn("Failed to persist dashboard state", error);
+    }
+  }, [state, ingestionConnected]);
+
+  useEffect(() => {
     return () => {
       isMountedRef.current = false;
     };
   }, []);
 
   useEffect(() => {
-    if (state.session.status === "listening") {
+    if (effectiveStatus === "listening") {
       setAlerts((previous) =>
         previous.filter(
           (alert) => alert.id !== "monitoring-idle" && alert.id !== "ingestion-error"
@@ -487,7 +547,7 @@ export default function DashboardShell({
       return;
     }
 
-    const sessionStatus = state.session.status;
+    const sessionStatus = effectiveStatus;
     const fallbackId = sessionStatus === "errored" ? "ingestion-error" : "monitoring-idle";
     const fallbackAlert: DashboardAlert = {
       id: fallbackId,
@@ -526,13 +586,25 @@ export default function DashboardShell({
     if (replaced) {
       alertsFingerprintRef.current = null;
     }
-  }, [state.session.status]);
+  }, [effectiveStatus]);
 
   const handleUpdate = useCallback((update: LiveUpdate) => {
     setState((prev) => {
       switch (update.type) {
         case "reset": {
-          return createInitialState(update.payload);
+          const next = createInitialState(update.payload);
+          const sessionOverride = update.payload?.session;
+          return {
+            ...next,
+            session: {
+              status: sessionOverride?.status ?? prev.session.status,
+              channel: sessionOverride?.channel ?? prev.session.channel,
+              startedAt:
+                typeof sessionOverride?.startedAt === "undefined"
+                  ? prev.session.startedAt
+                  : sessionOverride?.startedAt ?? null,
+            },
+          };
         }
         case "ai-mood": {
           return {
@@ -806,10 +878,7 @@ export default function DashboardShell({
     const sentimentMeta = sentimentLabel(sentiment);
     const trendPercent = state.metrics.trend ?? null;
     const sessionDuration = formatDuration(state.session.startedAt);
-    const statusMeta = describeStatus(state.session.status, ingestionConnected);
-
-    const timelineVelocity = state.timeline.map((point) => point.velocity);
-    const velocityPeak = timelineVelocity.length > 0 ? Math.max(...timelineVelocity) : 0;
+    const statusMeta = describeStatus(effectiveStatus, ingestionConnected);
 
     const chatSample = state.chat.slice(0, 50);
 
@@ -871,7 +940,6 @@ export default function DashboardShell({
       trendPercent,
       sessionDuration,
       statusMeta,
-      velocityPeak,
       chatSample,
       questions,
       insights,
@@ -902,7 +970,7 @@ export default function DashboardShell({
         },
       },
     };
-  }, [state, ingestionConnected]);
+  }, [state, ingestionConnected, effectiveStatus]);
 
   const fetchAlerts = useCallback(
     async (force = false) => {
@@ -1076,7 +1144,7 @@ export default function DashboardShell({
 
             if (
               alert.message === CALM_ALERT_MESSAGE &&
-              state.session.status !== "listening"
+              effectiveStatus !== "listening"
             ) {
               return null;
             }
@@ -1134,7 +1202,7 @@ export default function DashboardShell({
     [
       state.chat,
       state.session.startedAt,
-      state.session.status,
+      effectiveStatus,
       state.metrics.baseline.messageRate,
       state.metrics.baseline.uniqueChatters,
       state.metrics.baseline.newcomers,
@@ -1150,7 +1218,7 @@ export default function DashboardShell({
 
   useEffect(() => {
     fetchAlerts();
-  }, [fetchAlerts, state.chat.length, state.session.status]);
+  }, [fetchAlerts, state.chat.length, effectiveStatus]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -1310,16 +1378,6 @@ export default function DashboardShell({
         </div>
       </section>
 
-      <section className="rounded-3xl border border-slate-800 bg-slate-950/70 p-6 shadow-lg shadow-slate-950/40">
-        <header className="flex flex-col gap-1">
-          <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Mood & velocity</p>
-          <h3 className="text-lg font-semibold text-slate-100">Chat energy over time</h3>
-          <p className="text-sm text-slate-400">
-            Correlate spikes in messages with audience mood to spot the moments worth leaning into.
-          </p>
-        </header>
-        <MoodVelocityTrack points={state.timeline} peak={derived.velocityPeak} sentiment={derived.sentiment} />
-      </section>
     </div>
   );
 }
@@ -1343,127 +1401,6 @@ function MetricStat({ title, value, helper, tone = "neutral" }: MetricStatProps)
       <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{title}</p>
       <p className={`mt-1.5 text-lg font-semibold ${toneClass}`}>{value}</p>
       {helper ? <p className="mt-1 text-[10px] text-slate-500">{helper}</p> : null}
-    </div>
-  );
-}
-
-type MoodVelocityTrackProps = {
-  points: TimelinePoint[];
-  peak: number;
-  sentiment: number;
-};
-
-function MoodVelocityTrack({ points, peak, sentiment }: MoodVelocityTrackProps) {
-  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-
-  const normalized = useMemo(() => {
-    if (points.length === 0 || peak === 0) {
-      return [] as Array<{ x: number; y: number }>;
-    }
-    const minTime = points[0].timestamp;
-    const maxTime = points[points.length - 1].timestamp;
-    const span = Math.max(maxTime - minTime, 1);
-    return points.map((point) => ({
-      x: (point.timestamp - minTime) / span,
-      y: point.velocity / Math.max(peak, 1),
-    }));
-  }, [points, peak]);
-
-  const moodHue = sentiment > 0.3 ? "from-emerald-500/20" : sentiment < -0.3 ? "from-rose-500/20" : "from-slate-500/20";
-
-  const handlePointer = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (normalized.length === 0) {
-      return;
-    }
-    const rect = event.currentTarget.getBoundingClientRect();
-    const ratio = clamp((event.clientX - rect.left) / rect.width, 0, 1);
-    let nearestIndex = 0;
-    let nearestDistance = Number.POSITIVE_INFINITY;
-    normalized.forEach((point, index) => {
-      const distance = Math.abs(point.x - ratio);
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestIndex = index;
-      }
-    });
-    setHoverIndex(nearestIndex);
-  };
-
-  const hoveredPoint = hoverIndex !== null ? points[hoverIndex] : null;
-  const hoveredNormalized = hoverIndex !== null ? normalized[hoverIndex] : null;
-  const tooltipLeft = hoveredNormalized ? clamp(hoveredNormalized.x * 100, 8, 92) : 0;
-  const tooltipTop = hoveredNormalized ? clamp((1 - hoveredNormalized.y) * 100, 35, 82) : 0;
-
-  return (
-    <div className="mt-6">
-      <div
-        className={`relative h-48 w-full overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/40 ${normalized.length === 0 ? "flex items-center justify-center text-sm text-slate-500" : ""}`}
-      >
-        {normalized.length === 0 ? (
-          <span>Waiting for live chat activity…</span>
-        ) : (
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full">
-            <defs>
-              <linearGradient id="velocityGradient" x1="0" x2="1" y1="0" y2="1">
-                <stop offset="0%" stopColor="rgba(124, 58, 237, 0.4)" />
-                <stop offset="100%" stopColor="rgba(59, 130, 246, 0.2)" />
-              </linearGradient>
-            </defs>
-            <polygon
-              points={`0,100 ${normalized
-                .map((point) => `${point.x * 100},${(1 - point.y) * 100}`)
-                .join(" ")} 100,100`}
-              fill="url(#velocityGradient)"
-              stroke="none"
-            />
-            <polyline
-              points={normalized.map((point) => `${point.x * 100},${(1 - point.y) * 100}`).join(" ")}
-              fill="none"
-              stroke="rgba(124, 58, 237, 0.8)"
-              strokeWidth={1.5}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        )}
-        {normalized.length > 0 ? (
-          <div className={`pointer-events-none absolute inset-0 bg-gradient-to-b ${moodHue} to-slate-950/40`} />
-        ) : null}
-        {hoveredPoint && hoveredNormalized ? (
-          <>
-            <div
-              className="pointer-events-none absolute inset-y-0 w-px bg-violet-400/60"
-              style={{ left: `${hoveredNormalized.x * 100}%` }}
-            />
-            <div
-              className="pointer-events-none absolute -translate-x-1/2 -translate-y-full rounded-lg border border-slate-700 bg-slate-900/95 px-3 py-2 text-xs text-slate-200 shadow-lg shadow-slate-950/40"
-              style={{
-                left: `${tooltipLeft}%`,
-                top: `${tooltipTop}%`,
-              }}
-            >
-              <p className="font-semibold text-slate-100">
-                {formatNumber(hoveredPoint.velocity)} messages/min
-              </p>
-              <p className="text-[11px] text-slate-400">
-                {timeFormatter.format(new Date(hoveredPoint.timestamp))}
-              </p>
-            </div>
-          </>
-        ) : null}
-        {normalized.length > 0 ? (
-          <div
-            className="absolute inset-0 cursor-crosshair"
-            onPointerMove={handlePointer}
-            onPointerDown={handlePointer}
-            onPointerLeave={() => setHoverIndex(null)}
-          />
-        ) : null}
-      </div>
-      <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
-        <span>Earlier</span>
-        <span>Latest</span>
-      </div>
     </div>
   );
 }

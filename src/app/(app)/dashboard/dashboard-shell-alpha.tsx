@@ -6,7 +6,6 @@ import EventsCard from "./components/events-card";
 import LiveChatFeed from "./components/live-chat-feed";
 import MetricCard from "./components/metric-card";
 import SessionStatusCard from "./components/session-status-card";
-import TimelineCard from "./components/timeline-card";
 import TopTokensCard from "./components/top-tokens-card";
 
 type SessionStatus = "idle" | "listening" | "errored";
@@ -181,6 +180,8 @@ const initialState: LiveState = {
   chat: [],
 };
 
+const DASHBOARD_STORAGE_KEY = "streamerpulse:dashboard-state";
+
 const MAX_TIMELINE_POINTS = 60;
 const MAX_CHAT_MESSAGES = 50;
 const MAX_EVENTS = 20;
@@ -224,20 +225,64 @@ function createInitialState(overrides?: Partial<LiveState>): LiveState {
   };
 }
 
+function computeEffectiveStatus(
+  session: LiveState["session"],
+  ingestionConnected: boolean,
+  chat: ChatMessage[]
+): SessionStatus {
+  if (session.status === "errored") {
+    return "errored";
+  }
+  if (session.status === "listening") {
+    return "listening";
+  }
+  if (session.startedAt) {
+    return "listening";
+  }
+  if (ingestionConnected && chat.length > 0) {
+    return "listening";
+  }
+  return session.status;
+}
+
 export default function DashboardShellAlpha({
   initialState: initialOverrides,
   initialIngestionConnected,
   channelLogin,
   viewerId,
 }: DashboardShellAlphaProps) {
-  const [state, setState] = useState<LiveState>(() => createInitialState(initialOverrides));
+  const [state, setState] = useState<LiveState>(() => {
+    const baseOverrides = initialOverrides ?? {};
+    if (typeof window === "undefined") {
+      return createInitialState(baseOverrides);
+    }
+
+    try {
+      const raw = window.sessionStorage.getItem(DASHBOARD_STORAGE_KEY);
+      if (raw) {
+        const persisted = JSON.parse(raw) as Partial<LiveState>;
+        return createInitialState({ ...baseOverrides, ...persisted });
+      }
+    } catch (error) {
+      console.warn("Failed to restore dashboard state from sessionStorage", error);
+    }
+
+    return createInitialState(baseOverrides);
+  });
   const [ingestionConnected, setIngestionConnected] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      const stored = window.sessionStorage.getItem(`${DASHBOARD_STORAGE_KEY}:ingestion`);
+      if (stored === "true" || stored === "false") {
+        return stored === "true";
+      }
+    }
     if (typeof initialIngestionConnected === "boolean") {
       return initialIngestionConnected;
     }
     const status = initialOverrides?.session?.status;
     return status === "listening";
   });
+  const effectiveStatus = computeEffectiveStatus(state.session, ingestionConnected, state.chat);
 
   useEffect(() => {
     if (typeof initialIngestionConnected === "boolean") {
@@ -246,6 +291,21 @@ export default function DashboardShellAlpha({
       setIngestionConnected(initialIngestionConnected);
     }
   }, [initialIngestionConnected]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(state));
+      window.sessionStorage.setItem(
+        `${DASHBOARD_STORAGE_KEY}:ingestion`,
+        ingestionConnected ? "true" : "false"
+      );
+    } catch (error) {
+      console.warn("Failed to persist dashboard state", error);
+    }
+  }, [state, ingestionConnected]);
 
   const handleUpdate = useCallback((update: LiveUpdate) => {
     setState((prev) => {
@@ -382,12 +442,18 @@ export default function DashboardShellAlpha({
           return { ...prev, chat: next };
         }
         case "reset": {
-          if (!update.payload) {
-            return initialState;
-          }
+          const next = createInitialState(update.payload);
+          const sessionOverride = update.payload?.session;
           return {
-            ...initialState,
-            ...update.payload,
+            ...next,
+            session: {
+              status: sessionOverride?.status ?? prev.session.status,
+              channel: sessionOverride?.channel ?? prev.session.channel,
+              startedAt:
+                typeof sessionOverride?.startedAt === "undefined"
+                  ? prev.session.startedAt
+                  : sessionOverride?.startedAt ?? null,
+            },
           };
         }
         default:
@@ -467,7 +533,7 @@ export default function DashboardShellAlpha({
         : "0";
 
     const sessionHelper =
-      state.session.status === "listening"
+      effectiveStatus === "listening"
         ? "Session is streaming live data."
         : "Session controls become available after connecting Twitch.";
 
@@ -476,7 +542,7 @@ export default function DashboardShellAlpha({
         label: "Messages / min",
         value: messageRateValue,
         helper:
-          state.session.status === "listening"
+          effectiveStatus === "listening"
             ? "Updating every ~5 seconds."
             : "Start a monitoring session to populate this metric.",
         trend: state.metrics.trend ?? undefined,
@@ -493,11 +559,11 @@ export default function DashboardShellAlpha({
       },
       {
         label: "Active session",
-        value: state.session.status === "listening" ? "Live" : "Idle",
+        value: effectiveStatus === "listening" ? "Live" : effectiveStatus === "errored" ? "Error" : "Idle",
         helper: sessionHelper,
       },
     ];
-  }, [state.metrics, state.session.status]);
+  }, [state.metrics, effectiveStatus]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -512,7 +578,7 @@ export default function DashboardShellAlpha({
 
       <div className="grid gap-6 lg:grid-cols-[3fr_2fr]">
         <SessionStatusCard
-          status={state.session.status}
+          status={effectiveStatus}
           channel={state.session.channel}
           startedAt={state.session.startedAt}
           ingestionConnected={ingestionConnected}
@@ -530,10 +596,7 @@ export default function DashboardShellAlpha({
         ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[3fr_2fr]">
-        <TimelineCard points={state.timeline} />
-        <EventsCard events={state.events} />
-      </div>
+      <EventsCard events={state.events} />
 
       <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
         <TopTokensCard tokens={state.tokens.tokens} emotes={state.tokens.emotes} />
