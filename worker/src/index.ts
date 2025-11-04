@@ -160,6 +160,7 @@ const ONE_MINUTE = 60 * 1000;
 const TEN_MINUTES = 10 * ONE_MINUTE;
 const FIVE_MINUTES = 5 * ONE_MINUTE;
 const STREAM_STATUS_POLL_INTERVAL = 5 * 1000;
+const CHAT_ACTIVITY_GRACE_MS = 12 * 60 * 1000;
 const SHORT_EMA_SECONDS = 20;
 const LONG_EMA_SECONDS = 180;
 const BASELINE_READY_SECONDS = 90;
@@ -1103,6 +1104,7 @@ async function runSingleChannelIngest() {
   let startingSession = false;
 
   let activeStreamId: Id<"streams"> | null = null;
+  let lastChatMessageAt = 0;
   let sessionStartedAt: number | null = null;
   let statusPollTimer: ReturnType<typeof setInterval> | null = null;
   let lastReportedStatus: "live" | "offline" = "offline";
@@ -1361,7 +1363,7 @@ async function runSingleChannelIngest() {
 
   let streamStatusWarningLogged = false;
 
-  async function fetchStreamLive(login: string) {
+  async function fetchStreamLive(login: string): Promise<boolean | null> {
     if (!userAccessToken) {
       if (!streamStatusWarningLogged) {
         console.warn(
@@ -1383,8 +1385,19 @@ async function runSingleChannelIngest() {
 
     if (!response.ok) {
       const text = await response.text();
+      if (response.status === 401 || response.status === 403) {
+        if (!streamStatusWarningLogged) {
+          console.warn(
+            `[twitch:${twitchChannel}] Stream status request unauthorized (${response.status}). Falling back to chat activity while attempting token refresh.`
+          );
+          streamStatusWarningLogged = true;
+        }
+        return null;
+      }
       throw new Error(`Failed to fetch stream status: ${response.status} ${text}`);
     }
+
+    streamStatusWarningLogged = false;
 
     const body: { data?: Array<{ type?: string | null }> } = await response.json();
     const isLive = Array.isArray(body.data)
@@ -1502,6 +1515,29 @@ async function runSingleChannelIngest() {
       const isLive = await fetchStreamLive(twitchChannel);
 
       const channelLabel = channelDisplayName ?? twitchChannel;
+      const now = Date.now();
+      const recentlyActive =
+        lastChatMessageAt > 0 && now - lastChatMessageAt <= CHAT_ACTIVITY_GRACE_MS;
+
+      if (isLive === null) {
+        if (recentlyActive && activeStreamId && lastReportedStatus !== "live") {
+          lastReportedStatus = "live";
+          await postLiveFeed(twitchChannel, {
+            type: "session",
+            channel: twitchChannel,
+            channelLogin: twitchChannel,
+            payload: {
+              status: "listening",
+              channel: channelDisplayName,
+              channelLogin: twitchChannel,
+              startedAt: sessionStartedAt,
+              ingestionConnected: true,
+            },
+          });
+        }
+        return;
+      }
+
       if (isLive && !activeStreamId) {
         const now = Date.now();
         console.log(
@@ -1509,6 +1545,24 @@ async function runSingleChannelIngest() {
         );
         await startIngestionSession(now);
       } else if (!isLive && activeStreamId) {
+        if (recentlyActive) {
+          if (lastReportedStatus !== "live") {
+            lastReportedStatus = "live";
+            await postLiveFeed(twitchChannel, {
+              type: "session",
+              channel: twitchChannel,
+              channelLogin: twitchChannel,
+              payload: {
+                status: "listening",
+                channel: channelDisplayName,
+                channelLogin: twitchChannel,
+                startedAt: sessionStartedAt,
+                ingestionConnected: true,
+              },
+            });
+          }
+          return;
+        }
         console.log(
           `[twitch:${twitchChannel}] Channel ${channelLabel} went offline (detected via ${context}). Ending ingestion.`
         );
@@ -1528,6 +1582,22 @@ async function runSingleChannelIngest() {
           },
         });
       } else if (!isLive && lastReportedStatus !== "offline") {
+        if (recentlyActive) {
+          lastReportedStatus = "live";
+          await postLiveFeed(twitchChannel, {
+            type: "session",
+            channel: twitchChannel,
+            channelLogin: twitchChannel,
+            payload: {
+              status: "listening",
+              channel: channelDisplayName,
+              channelLogin: twitchChannel,
+              startedAt: sessionStartedAt,
+              ingestionConnected: true,
+            },
+          });
+          return;
+        }
         lastReportedStatus = "offline";
         aggregator.reset();
         pendingMessages = [];
@@ -1629,27 +1699,46 @@ async function runSingleChannelIngest() {
         }
       }
 
+      lastChatMessageAt = timestamp;
+
       if (!activeStreamId) {
-        if (!userAccessToken) {
-          await startIngestionSession(timestamp);
-        } else {
-          return;
-        }
+        await startIngestionSession(timestamp);
+      }
+
+      if (!activeStreamId) {
+        // Failed to establish a session; skip processing until it becomes available.
+        return;
       }
       const tokens = tokenizeMessage(message);
       const emotes = extractEmotes(message, tags);
       const fallbackEmotes = extractFallbackEmotes(message);
       const dedupedEmotes = new Map<string, TrackedEmote>();
-      [...emotes, ...fallbackEmotes].forEach((emote) => {
+      const seenCodes = new Set<string>();
+
+      emotes.forEach((emote) => {
         const display = emote.code || emote.id || "";
         if (!display) {
           return;
         }
-        const key = (emote.id ?? display).toLowerCase();
-        if (!dedupedEmotes.has(key)) {
-          dedupedEmotes.set(key, { code: emote.code || display, id: emote.id ?? null });
+        const codeKey = (emote.code ?? display).toLowerCase();
+        seenCodes.add(codeKey);
+        if (!dedupedEmotes.has(codeKey)) {
+          dedupedEmotes.set(codeKey, { code: emote.code || display, id: emote.id ?? null });
         }
       });
+
+      fallbackEmotes.forEach((emote) => {
+        const display = emote.code || "";
+        if (!display) {
+          return;
+        }
+        const codeKey = display.toLowerCase();
+        if (seenCodes.has(codeKey) || dedupedEmotes.has(codeKey)) {
+          return;
+        }
+        dedupedEmotes.set(codeKey, { code: display, id: emote.id ?? null });
+      });
+
       const allEmotes = Array.from(dedupedEmotes.values());
       const sentimentScoreRaw = sentimentAnalyzer.analyze(message).score;
       const sentimentScore = Math.max(-1, Math.min(1, sentimentScoreRaw / 10));
