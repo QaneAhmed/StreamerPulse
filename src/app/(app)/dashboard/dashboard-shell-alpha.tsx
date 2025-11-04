@@ -20,6 +20,12 @@ type TokenRow = {
   count: number;
 };
 
+type EmoteRow = {
+  code: string;
+  id?: string | null;
+  count: number;
+};
+
 type EventItem = {
   id: string;
   title: string;
@@ -63,7 +69,7 @@ type LiveState = {
   events: EventItem[];
   tokens: {
     tokens: TokenRow[];
-    emotes: TokenRow[];
+    emotes: EmoteRow[];
   };
   audience: {
     uniqueChatters: number;
@@ -211,7 +217,7 @@ function createInitialState(overrides?: Partial<LiveState>): LiveState {
     events: overrides.events ?? initialState.events,
     tokens: {
       tokens: overrides.tokens?.tokens ?? initialState.tokens.tokens,
-      emotes: overrides.tokens?.emotes ?? initialState.tokens.emotes,
+      emotes: normalizeEmoteRows(overrides.tokens?.emotes ?? initialState.tokens.emotes),
     },
     audience: {
       ...initialState.audience,
@@ -243,6 +249,50 @@ function computeEffectiveStatus(
     return "listening";
   }
   return session.status;
+}
+
+function normalizeEmoteRows(input: unknown): EmoteRow[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const normalized: EmoteRow[] = [];
+
+  input.forEach((item) => {
+    if (typeof item === "string") {
+      normalized.push({ code: item, id: null, count: 0 });
+      return;
+    }
+    if (!item || typeof item !== "object") {
+      return;
+    }
+
+    const candidate = item as Partial<EmoteRow> & { name?: string };
+    const code =
+      typeof candidate.code === "string" && candidate.code.trim().length > 0
+        ? candidate.code
+        : typeof candidate.name === "string" && candidate.name.trim().length > 0
+          ? candidate.name
+          : null;
+
+    if (!code) {
+      return;
+    }
+
+    const id =
+      typeof candidate.id === "string" && candidate.id.trim().length > 0
+        ? candidate.id
+        : null;
+
+    const count =
+      typeof candidate.count === "number" && Number.isFinite(candidate.count)
+        ? candidate.count
+        : 0;
+
+    normalized.push({ code, id, count });
+  });
+
+  return normalized;
 }
 
 export default function DashboardShellAlpha({
@@ -399,11 +449,15 @@ export default function DashboardShellAlpha({
           return prev;
         }
         case "tokens": {
+          const nextEmotes =
+            typeof update.payload.emotes === "undefined"
+              ? prev.tokens.emotes
+              : normalizeEmoteRows(update.payload.emotes);
           return {
             ...prev,
             tokens: {
               tokens: update.payload.tokens ?? prev.tokens.tokens,
-              emotes: update.payload.emotes ?? prev.tokens.emotes,
+              emotes: nextEmotes,
             },
           };
         }

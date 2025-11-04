@@ -36,6 +36,17 @@ type TokenRow = {
   count: number;
 };
 
+type EmoteRow = {
+  code: string;
+  id?: string | null;
+  count: number;
+};
+
+type TrackedEmote = {
+  code: string;
+  id?: string | null;
+};
+
 type EventItem = {
   id: string;
   title: string;
@@ -68,7 +79,7 @@ type AggregatedSnapshot = {
   uniqueChatters: number;
   newcomers: number;
   topTokens: TokenRow[];
-  topEmotes: TokenRow[];
+  topEmotes: EmoteRow[];
   event?: EventItem;
   baseline: {
     messageRate: BaselineSnapshot;
@@ -83,7 +94,7 @@ type MessageRecord = {
   authorHash: string;
   authorDisplay?: string;
   tokens: string[];
-  emotes: string[];
+  emotes: TrackedEmote[];
   sentiment: number;
   tone: ChatTone;
   toneConfidence: number;
@@ -238,12 +249,17 @@ class MetricsAggregator {
     const emoteCounts = new Map<
       string,
       {
-        name: string;
+        code: string;
+        id?: string | null;
         count: number;
       }
     >();
     chatterWindow.forEach((message) => {
-      const messageEmoteSet = new Set(message.emotes.map((emote) => emote.toLowerCase()));
+      const messageEmoteSet = new Set(
+        message.emotes
+          .map((emote) => emote.code?.toLowerCase())
+          .filter((value): value is string => Boolean(value))
+      );
       message.tokens.forEach((token) => {
         if (GLOBAL_TWITCH_EMOTES.has(token) || messageEmoteSet.has(token)) {
           return;
@@ -251,12 +267,16 @@ class MetricsAggregator {
         tokenCounts.set(token, (tokenCounts.get(token) ?? 0) + 1);
       });
       message.emotes.forEach((emote) => {
-        const key = emote.toLowerCase();
+        const displayCode = emote.code || emote.id || "";
+        if (!displayCode) {
+          return;
+        }
+        const key = (emote.id ?? displayCode).toLowerCase();
         const existing = emoteCounts.get(key);
         if (existing) {
           existing.count += 1;
         } else {
-          emoteCounts.set(key, { name: emote, count: 1 });
+          emoteCounts.set(key, { code: displayCode, id: emote.id ?? null, count: 1 });
         }
       });
     });
@@ -264,10 +284,17 @@ class MetricsAggregator {
     const topEmotes = Array.from(emoteCounts.values())
       .sort((a, b) => b.count - a.count)
       .slice(0, 6)
-      .map(({ name, count }) => ({ name, count }));
+      .map(({ code, id, count }) => ({ code, id: id ?? null, count }));
 
-    const emoteKeySet = new Set(topEmotes.map((emote) => emote.name.toLowerCase()))
-      ;
+    const emoteKeySet = new Set(
+      topEmotes.flatMap((emote) => {
+        const values = [emote.code.toLowerCase()];
+        if (emote.id) {
+          values.push(emote.id.toLowerCase());
+        }
+        return values;
+      })
+    );
 
     const topTokens = Array.from(tokenCounts.entries())
       .filter(([name]) => !GLOBAL_TWITCH_EMOTES.has(name) && !emoteKeySet.has(name.toLowerCase()))
@@ -832,18 +859,18 @@ function extractEmotes(message: string, tags: Tags) {
     return [];
   }
 
-  const emotes: string[] = [];
+  const emotes: TrackedEmote[] = [];
   const segments = emoteTag.split("/");
   segments.forEach((segment) => {
     const [emoteId, ranges] = segment.split(":");
     if (!ranges) return;
     ranges.split(",").forEach((range) => {
       const [start, end] = range.split("-").map((value) => Number.parseInt(value, 10));
-      const code = message.slice(start, end + 1);
+      const code = message.slice(start, end + 1).trim();
       if (code) {
-        emotes.push(code);
-      } else {
-        emotes.push(emoteId);
+        emotes.push({ code, id: emoteId ?? null });
+      } else if (emoteId) {
+        emotes.push({ code: emoteId, id: emoteId });
       }
     });
   });
@@ -862,7 +889,7 @@ function extractFallbackEmotes(message: string) {
       candidates.add(sanitized);
     }
   });
-  return Array.from(candidates);
+  return Array.from(candidates).map((code) => ({ code, id: null }));
 }
 
 async function sendLiveFeedUpdates(channel: string | { channelLogin?: string; channel?: string }, updates: unknown[]) {
@@ -1612,7 +1639,18 @@ async function runSingleChannelIngest() {
       const tokens = tokenizeMessage(message);
       const emotes = extractEmotes(message, tags);
       const fallbackEmotes = extractFallbackEmotes(message);
-      const allEmotes = Array.from(new Set([...emotes, ...fallbackEmotes]));
+      const dedupedEmotes = new Map<string, TrackedEmote>();
+      [...emotes, ...fallbackEmotes].forEach((emote) => {
+        const display = emote.code || emote.id || "";
+        if (!display) {
+          return;
+        }
+        const key = (emote.id ?? display).toLowerCase();
+        if (!dedupedEmotes.has(key)) {
+          dedupedEmotes.set(key, { code: emote.code || display, id: emote.id ?? null });
+        }
+      });
+      const allEmotes = Array.from(dedupedEmotes.values());
       const sentimentScoreRaw = sentimentAnalyzer.analyze(message).score;
       const sentimentScore = Math.max(-1, Math.min(1, sentimentScoreRaw / 10));
       const authorHash = hashAuthor(
@@ -1824,18 +1862,22 @@ async function runSingleChannelIngest() {
   process.on("SIGTERM", handleShutdown);
 }
 
-function countEmotes(items: string[]) {
-  const counts = new Map<string, { name: string; count: number }>();
+function countEmotes(items: TrackedEmote[]) {
+  const counts = new Map<string, { code: string; count: number }>();
   items.forEach((item) => {
-    const key = item.toLowerCase();
+    const display = item.code || item.id || "";
+    if (!display) {
+      return;
+    }
+    const key = (item.id ?? display).toLowerCase();
     const existing = counts.get(key);
     if (existing) {
       existing.count += 1;
     } else {
-      counts.set(key, { name: item, count: 1 });
+      counts.set(key, { code: display, count: 1 });
     }
   });
-  return Array.from(counts.values()).map(({ name, count }) => ({ code: name, count }));
+  return Array.from(counts.values());
 }
 
 async function resolveIntegration(convex: ConvexHttpClient): Promise<ChannelIntegration> {

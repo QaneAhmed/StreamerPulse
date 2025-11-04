@@ -1,9 +1,10 @@
 'use client';
 
+import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AlertList from "./components/alert-list";
-import TrendList from "./components/trend-list";
 import type { ChatTone } from "@/lib/ai/chat-tone";
+import { getTwitchEmoteImageUrl } from "@/lib/twitch/emotes";
 
 type SessionStatus = "idle" | "listening" | "errored";
 
@@ -22,6 +23,12 @@ type BaselineSnapshot = {
 
 type TokenRow = {
   name: string;
+  count: number;
+};
+
+type EmoteRow = {
+  code: string;
+  id?: string | null;
   count: number;
 };
 
@@ -63,7 +70,7 @@ type LiveState = {
   events: EventItem[];
   tokens: {
     tokens: TokenRow[];
-    emotes: TokenRow[];
+    emotes: EmoteRow[];
   };
   audience: {
     uniqueChatters: number;
@@ -139,7 +146,7 @@ type LiveUpdate =
       type: "tokens";
       payload: {
         tokens?: TokenRow[];
-        emotes?: TokenRow[];
+        emotes?: EmoteRow[];
       };
     }
   | {
@@ -274,7 +281,7 @@ function createInitialState(overrides?: Partial<LiveState>): LiveState {
     events: overrides.events ?? initialState.events,
     tokens: {
       tokens: overrides.tokens?.tokens ?? initialState.tokens.tokens,
-      emotes: overrides.tokens?.emotes ?? initialState.tokens.emotes,
+      emotes: normalizeEmoteRows(overrides.tokens?.emotes ?? initialState.tokens.emotes),
     },
     audience: {
       ...initialState.audience,
@@ -291,6 +298,50 @@ function createInitialState(overrides?: Partial<LiveState>): LiveState {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function normalizeEmoteRows(input: unknown): EmoteRow[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  const normalized: EmoteRow[] = [];
+
+  input.forEach((item) => {
+    if (typeof item === "string") {
+      normalized.push({ code: item, id: null, count: 0 });
+      return;
+    }
+    if (!item || typeof item !== "object") {
+      return;
+    }
+
+    const candidate = item as Partial<EmoteRow> & { name?: string };
+    const code =
+      typeof candidate.code === "string" && candidate.code.trim().length > 0
+        ? candidate.code
+        : typeof candidate.name === "string" && candidate.name.trim().length > 0
+          ? candidate.name
+          : null;
+
+    if (!code) {
+      return;
+    }
+
+    const id =
+      typeof candidate.id === "string" && candidate.id.trim().length > 0
+        ? candidate.id
+        : null;
+
+    const count =
+      typeof candidate.count === "number" && Number.isFinite(candidate.count)
+        ? candidate.count
+        : 0;
+
+    normalized.push({ code, id, count });
+  });
+
+  return normalized;
 }
 
 function formatDuration(startedAt: number | null) {
@@ -710,11 +761,15 @@ export default function DashboardShell({
           return prev;
         }
         case "tokens": {
+          const nextEmotes =
+            typeof update.payload.emotes === "undefined"
+              ? prev.tokens.emotes
+              : normalizeEmoteRows(update.payload.emotes);
           return {
             ...prev,
             tokens: {
               tokens: update.payload.tokens ?? prev.tokens.tokens,
-              emotes: update.payload.emotes ?? prev.tokens.emotes,
+              emotes: nextEmotes,
             },
           };
         }
@@ -1314,15 +1369,42 @@ export default function DashboardShell({
             <div className="grid flex-1 gap-4 overflow-hidden min-h-0 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.5fr)]">
               <div className="flex flex-1 flex-col overflow-hidden min-h-0">
                 <div className="flex-1 overflow-y-auto pr-2">
-                  <TrendList
-                    title="Top Emotes"
-                    rows={state.tokens.emotes.slice(0, 6).map((emote) => ({
-                      name: emote.name,
-                      meta: `×${emote.count}`,
-                    }))}
-                    emptyLabel="Emotes will appear once chat uses them."
-                    symbolPrefix="😄"
-                  />
+                  <ul className="space-y-2">
+                    {state.tokens.emotes.length === 0 ? (
+                      <li className="flex items-center justify-between rounded-lg border border-dashed border-slate-800 bg-slate-900/30 px-3 py-2 text-xs text-slate-500">
+                        Emotes will appear once chat uses them.
+                      </li>
+                    ) : (
+                      state.tokens.emotes.slice(0, 6).map((emote) => {
+                        const src = getTwitchEmoteImageUrl(emote.id, { size: "2.0", theme: "dark" });
+                        const key = emote.id ?? emote.code;
+                        return (
+                          <li
+                            key={key}
+                            className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/30 px-3 py-2 text-sm"
+                          >
+                            <div className="flex items-center gap-3">
+                              {src ? (
+                                <Image
+                                  src={src}
+                                  alt={emote.code}
+                                  width={24}
+                                  height={24}
+                                  className="h-6 w-6 rounded-sm border border-slate-800 bg-slate-950 object-contain"
+                                />
+                              ) : (
+                                <span className="flex h-6 w-6 items-center justify-center rounded-sm border border-dashed border-slate-700 text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                                  {emote.code.slice(0, 2).toUpperCase()}
+                                </span>
+                              )}
+                              <span className="text-slate-200">{emote.code}</span>
+                            </div>
+                            <span className="text-slate-500">×{emote.count.toLocaleString()}</span>
+                          </li>
+                        );
+                      })
+                    )}
+                  </ul>
                 </div>
               </div>
               <div className="flex flex-1 flex-col overflow-hidden min-h-0">
