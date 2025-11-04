@@ -9,6 +9,7 @@ type TokenRow = {
 type EmoteRow = {
   code: string;
   id?: string | null;
+  imageUrl?: string | null;
   count: number;
 };
 
@@ -47,7 +48,7 @@ function renderEmoteList(items: EmoteRow[], emptyLabel: string) {
   }
 
   return items.map((item) => {
-    const src = getTwitchEmoteImageUrl(item.id, { size: "2.0", theme: "dark" });
+    const src = item.imageUrl ?? getTwitchEmoteImageUrl(item.id, { size: "2.0", theme: "dark" });
     const key = item.id ?? item.code;
     return (
       <li

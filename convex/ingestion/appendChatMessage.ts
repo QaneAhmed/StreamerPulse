@@ -11,6 +11,8 @@ export const appendChatMessage = internalMutation({
     emotes: v.array(
       v.object({
         code: v.string(),
+        id: v.optional(v.union(v.string(), v.null())),
+        imageUrl: v.optional(v.union(v.string(), v.null())),
         count: v.number(),
       })
     ),

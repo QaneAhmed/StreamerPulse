@@ -39,12 +39,14 @@ type TokenRow = {
 type EmoteRow = {
   code: string;
   id?: string | null;
+  imageUrl?: string | null;
   count: number;
 };
 
 type TrackedEmote = {
   code: string;
   id?: string | null;
+  imageUrl?: string | null;
 };
 
 type EventItem = {
@@ -161,9 +163,31 @@ const TEN_MINUTES = 10 * ONE_MINUTE;
 const FIVE_MINUTES = 5 * ONE_MINUTE;
 const STREAM_STATUS_POLL_INTERVAL = 5 * 1000;
 const CHAT_ACTIVITY_GRACE_MS = 12 * 60 * 1000;
+const globalEmoteMap = new Map<string, string>();
+let globalEmoteMapFetched = false;
+let globalEmoteFetchFailed = false;
 const SHORT_EMA_SECONDS = 20;
 const LONG_EMA_SECONDS = 180;
 const BASELINE_READY_SECONDS = 90;
+
+function resolveEmoteIdFromMap(code: string | null | undefined) {
+  if (!code) {
+    return null;
+  }
+  const entry = globalEmoteMap.get(code.toLowerCase());
+  return entry ?? null;
+}
+
+function buildEmoteImageUrl(id: string | null | undefined) {
+  if (!id) {
+    return null;
+  }
+  const encoded = encodeURIComponent(id.trim());
+  if (!encoded) {
+    return null;
+  }
+  return `https://static-cdn.jtvnw.net/emoticons/v2/${encoded}/default/dark/2.0`;
+}
 
 type BaselineAccumulator = {
   short: number;
@@ -252,6 +276,7 @@ class MetricsAggregator {
       {
         code: string;
         id?: string | null;
+        imageUrl?: string | null;
         count: number;
       }
     >();
@@ -276,8 +301,20 @@ class MetricsAggregator {
         const existing = emoteCounts.get(key);
         if (existing) {
           existing.count += 1;
+          if (!existing.id && emote.id) {
+            existing.id = emote.id;
+          }
+          if (!existing.imageUrl && emote.imageUrl) {
+            existing.imageUrl = emote.imageUrl;
+          }
         } else {
-          emoteCounts.set(key, { code: displayCode, id: emote.id ?? null, count: 1 });
+          const resolvedId = emote.id ?? resolveEmoteIdFromMap(displayCode) ?? null;
+          emoteCounts.set(key, {
+            code: displayCode,
+            id: resolvedId,
+            imageUrl: emote.imageUrl ?? buildEmoteImageUrl(resolvedId),
+            count: 1,
+          });
         }
       });
     });
@@ -285,7 +322,16 @@ class MetricsAggregator {
     const topEmotes = Array.from(emoteCounts.values())
       .sort((a, b) => b.count - a.count)
       .slice(0, 6)
-      .map(({ code, id, count }) => ({ code, id: id ?? null, count }));
+      .map(({ code, id, imageUrl, count }) => {
+        const resolvedId = id ?? resolveEmoteIdFromMap(code) ?? null;
+        const resolvedUrl = imageUrl ?? buildEmoteImageUrl(resolvedId);
+        return {
+          code,
+          id: resolvedId,
+          imageUrl: resolvedUrl,
+          count,
+        };
+      });
 
     const emoteKeySet = new Set(
       topEmotes.flatMap((emote) => {
@@ -869,9 +915,9 @@ function extractEmotes(message: string, tags: Tags) {
       const [start, end] = range.split("-").map((value) => Number.parseInt(value, 10));
       const code = message.slice(start, end + 1).trim();
       if (code) {
-        emotes.push({ code, id: emoteId ?? null });
+        emotes.push({ code, id: emoteId ?? null, imageUrl: null });
       } else if (emoteId) {
-        emotes.push({ code: emoteId, id: emoteId });
+        emotes.push({ code: emoteId, id: emoteId, imageUrl: null });
       }
     });
   });
@@ -890,7 +936,7 @@ function extractFallbackEmotes(message: string) {
       candidates.add(sanitized);
     }
   });
-  return Array.from(candidates).map((code) => ({ code, id: null }));
+  return Array.from(candidates).map((code) => ({ code, id: null, imageUrl: null }));
 }
 
 async function sendLiveFeedUpdates(channel: string | { channelLogin?: string; channel?: string }, updates: unknown[]) {
@@ -1149,6 +1195,65 @@ async function runSingleChannelIngest() {
     userRefreshToken = refreshed.refreshToken ?? null;
     tokenExpiry = refreshed.expiresAt ?? Date.now() + 60 * 60 * 1000;
     authMode = userAccessToken ? "oauth" : "anonymous";
+    globalEmoteMapFetched = false;
+    globalEmoteFetchFailed = false;
+  }
+
+  async function ensureGlobalEmoteMap() {
+    if (globalEmoteMapFetched || globalEmoteFetchFailed) {
+      return;
+    }
+    if (!userAccessToken) {
+      return;
+    }
+
+    try {
+      let cursor: string | undefined;
+      do {
+        const url = new URL("https://api.twitch.tv/helix/chat/emotes/global");
+        if (cursor) {
+          url.searchParams.set("after", cursor);
+        }
+
+        const response = await fetch(url.toString(), {
+          headers: {
+            "Client-Id": twitchClientId,
+            Authorization: `Bearer ${userAccessToken}`,
+          },
+        });
+
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            globalEmoteFetchFailed = true;
+            console.warn(
+              `[twitch:${twitchChannel}] Unable to refresh global emote map (status ${response.status}).`
+            );
+            return;
+          }
+          const text = await response.text();
+          throw new Error(`Failed to fetch global emotes: ${response.status} ${text}`);
+        }
+
+        const json: {
+          data?: Array<{ id: string; name: string }>;
+          pagination?: { cursor?: string };
+        } = await response.json();
+
+        json.data?.forEach((entry) => {
+          if (entry?.id && entry?.name) {
+            globalEmoteMap.set(entry.name.toLowerCase(), entry.id);
+          }
+        });
+
+        cursor = json.pagination?.cursor ?? undefined;
+      } while (cursor);
+
+      globalEmoteMapFetched = true;
+      globalEmoteFetchFailed = false;
+    } catch (error) {
+      globalEmoteFetchFailed = true;
+      console.warn("[twitch] Failed to load global emote map", error);
+    }
   }
 
   async function analyzeChatSlice(messages: ChatMessagePayload[]) {
@@ -1699,6 +1804,10 @@ async function runSingleChannelIngest() {
         }
       }
 
+      if (!globalEmoteMapFetched && !globalEmoteFetchFailed) {
+        await ensureGlobalEmoteMap();
+      }
+
       lastChatMessageAt = timestamp;
 
       if (!activeStreamId) {
@@ -1722,8 +1831,14 @@ async function runSingleChannelIngest() {
         }
         const codeKey = (emote.code ?? display).toLowerCase();
         seenCodes.add(codeKey);
+        const resolvedId = emote.id ?? resolveEmoteIdFromMap(emote.code ?? display);
+        const imageUrl = emote.imageUrl ?? buildEmoteImageUrl(resolvedId);
         if (!dedupedEmotes.has(codeKey)) {
-          dedupedEmotes.set(codeKey, { code: emote.code || display, id: emote.id ?? null });
+          dedupedEmotes.set(codeKey, {
+            code: emote.code || display,
+            id: resolvedId,
+            imageUrl,
+          });
         }
       });
 
@@ -1736,7 +1851,9 @@ async function runSingleChannelIngest() {
         if (seenCodes.has(codeKey) || dedupedEmotes.has(codeKey)) {
           return;
         }
-        dedupedEmotes.set(codeKey, { code: display, id: emote.id ?? null });
+        const resolvedId = emote.id ?? resolveEmoteIdFromMap(display);
+        const imageUrl = emote.imageUrl ?? buildEmoteImageUrl(resolvedId);
+        dedupedEmotes.set(codeKey, { code: display, id: resolvedId, imageUrl });
       });
 
       const allEmotes = Array.from(dedupedEmotes.values());
@@ -1952,7 +2069,7 @@ async function runSingleChannelIngest() {
 }
 
 function countEmotes(items: TrackedEmote[]) {
-  const counts = new Map<string, { code: string; count: number }>();
+  const counts = new Map<string, { code: string; id: string | null; imageUrl: string | null; count: number }>();
   items.forEach((item) => {
     const display = item.code || item.id || "";
     if (!display) {
@@ -1962,8 +2079,18 @@ function countEmotes(items: TrackedEmote[]) {
     const existing = counts.get(key);
     if (existing) {
       existing.count += 1;
+      if (!existing.id && item.id) {
+        existing.id = item.id;
+        existing.imageUrl = item.imageUrl ?? buildEmoteImageUrl(item.id);
+      }
     } else {
-      counts.set(key, { code: display, count: 1 });
+      const resolvedId = item.id ?? resolveEmoteIdFromMap(item.code ?? display);
+      counts.set(key, {
+        code: display,
+        id: resolvedId,
+        imageUrl: item.imageUrl ?? buildEmoteImageUrl(resolvedId),
+        count: 1,
+      });
     }
   });
   return Array.from(counts.values());

@@ -29,6 +29,7 @@ type TokenRow = {
 type EmoteRow = {
   code: string;
   id?: string | null;
+  imageUrl?: string | null;
   count: number;
 };
 
@@ -228,6 +229,7 @@ const initialState: LiveState = {
 };
 
 const DASHBOARD_STORAGE_KEY = "streamerpulse:dashboard-state";
+const DASHBOARD_ALERTS_KEY = `${DASHBOARD_STORAGE_KEY}:alerts`;
 
 const MAX_TIMELINE_POINTS = 120;
 const MAX_CHAT_MESSAGES = 100;
@@ -309,7 +311,7 @@ function normalizeEmoteRows(input: unknown): EmoteRow[] {
 
   input.forEach((item) => {
     if (typeof item === "string") {
-      normalized.push({ code: item, id: null, count: 0 });
+      normalized.push({ code: item, id: null, imageUrl: null, count: 0 });
       return;
     }
     if (!item || typeof item !== "object") {
@@ -333,12 +335,17 @@ function normalizeEmoteRows(input: unknown): EmoteRow[] {
         ? candidate.id
         : null;
 
+    const imageUrl =
+      typeof candidate.imageUrl === "string" && candidate.imageUrl.trim().length > 0
+        ? candidate.imageUrl
+        : null;
+
     const count =
       typeof candidate.count === "number" && Number.isFinite(candidate.count)
         ? candidate.count
         : 0;
 
-    normalized.push({ code, id, count });
+    normalized.push({ code, id, imageUrl, count });
   });
 
   return normalized;
@@ -549,7 +556,29 @@ export default function DashboardShell({
     const status = initialOverrides?.session?.status;
     return status === "listening";
   });
-  const [alerts, setAlerts] = useState<DashboardAlert[]>([]);
+  const [alerts, setAlerts] = useState<DashboardAlert[]>(() => {
+    if (typeof window === "undefined") {
+      return [];
+    }
+    try {
+      const raw = window.sessionStorage.getItem(DASHBOARD_ALERTS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as DashboardAlert[];
+        if (Array.isArray(parsed)) {
+          return parsed.filter(
+            (alert) =>
+              alert &&
+              typeof alert === "object" &&
+              typeof alert.id === "string" &&
+              typeof alert.message === "string"
+          );
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to restore dashboard alerts from sessionStorage", error);
+    }
+    return [];
+  });
   const effectiveStatus = computeEffectiveStatus(state.session, ingestionConnected, state.chat);
   const alertsFingerprintRef = useRef<string | null>(null);
   const alertsRef = useRef<DashboardAlert[]>(alerts);
@@ -577,10 +606,12 @@ export default function DashboardShell({
         `${DASHBOARD_STORAGE_KEY}:ingestion`,
         ingestionConnected ? "true" : "false"
       );
+      const alertSnapshot = alerts.slice(0, 50);
+      window.sessionStorage.setItem(DASHBOARD_ALERTS_KEY, JSON.stringify(alertSnapshot));
     } catch (error) {
       console.warn("Failed to persist dashboard state", error);
     }
-  }, [state, ingestionConnected]);
+  }, [state, ingestionConnected, alerts]);
 
   useEffect(() => {
     return () => {
@@ -1376,7 +1407,7 @@ export default function DashboardShell({
                       </li>
                     ) : (
                       state.tokens.emotes.slice(0, 6).map((emote) => {
-                        const src = getTwitchEmoteImageUrl(emote.id, { size: "2.0", theme: "dark" });
+                        const src = emote.imageUrl ?? getTwitchEmoteImageUrl(emote.id, { size: "2.0", theme: "dark" });
                         const key = emote.id ?? emote.code;
                         return (
                           <li

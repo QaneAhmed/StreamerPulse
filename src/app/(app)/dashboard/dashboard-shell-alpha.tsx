@@ -23,6 +23,7 @@ type TokenRow = {
 type EmoteRow = {
   code: string;
   id?: string | null;
+  imageUrl?: string | null;
   count: number;
 };
 
@@ -260,7 +261,7 @@ function normalizeEmoteRows(input: unknown): EmoteRow[] {
 
   input.forEach((item) => {
     if (typeof item === "string") {
-      normalized.push({ code: item, id: null, count: 0 });
+      normalized.push({ code: item, id: null, imageUrl: null, count: 0 });
       return;
     }
     if (!item || typeof item !== "object") {
@@ -284,12 +285,17 @@ function normalizeEmoteRows(input: unknown): EmoteRow[] {
         ? candidate.id
         : null;
 
+    const imageUrl =
+      typeof candidate.imageUrl === "string" && candidate.imageUrl.trim().length > 0
+        ? candidate.imageUrl
+        : null;
+
     const count =
       typeof candidate.count === "number" && Number.isFinite(candidate.count)
         ? candidate.count
         : 0;
 
-    normalized.push({ code, id, count });
+    normalized.push({ code, id, imageUrl, count });
   });
 
   return normalized;
