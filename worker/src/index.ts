@@ -916,7 +916,10 @@ function extractEmotes(message: string, tags: Tags) {
     if (!ranges) return;
     ranges.split(",").forEach((range) => {
       const [start, end] = range.split("-").map((value) => Number.parseInt(value, 10));
-      const code = message.slice(start, end + 1).trim();
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) {
+        return;
+      }
+      const code = message.slice(start, end + 1);
       if (code) {
         emotes.push({
           code,

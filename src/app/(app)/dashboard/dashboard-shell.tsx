@@ -461,7 +461,7 @@ function computeEngagementScore({
   return { score, mood };
 }
 
-function describeStatus(status: SessionStatus, ingestionConnected: boolean) {
+function describeStatus(status: SessionStatus) {
   if (status === "listening") {
     return {
       label: "Live",
@@ -470,24 +470,10 @@ function describeStatus(status: SessionStatus, ingestionConnected: boolean) {
     };
   }
 
-  if (ingestionConnected) {
-    return {
-      label: "Monitoring",
-      helper: "Waiting for chat activity to begin.",
-      badgeTone: "bg-amber-500/10 text-amber-300 border border-amber-500/40",
-    };
-  }
-
   return {
-    label: status === "errored" ? "Attention" : "Offline",
-    helper:
-      status === "errored"
-        ? "We lost the chat connection. Restart the ingestion worker to resume analytics."
-        : "Start the ingestion worker to begin streaming insights.",
-    badgeTone:
-      status === "errored"
-        ? "bg-rose-500/10 text-rose-300 border border-rose-500/40"
-        : "bg-slate-800 text-slate-300 border border-slate-700",
+    label: "Offline",
+    helper: "Start the ingestion worker to begin streaming insights.",
+    badgeTone: "bg-slate-800 text-slate-300 border border-slate-700",
   };
 }
 
@@ -972,7 +958,7 @@ export default function DashboardShell({
     const sentimentMeta = sentimentLabel(sentiment);
     const trendPercent = state.metrics.trend ?? null;
     const sessionDuration = formatDuration(state.session.startedAt);
-    const statusMeta = describeStatus(effectiveStatus, ingestionConnected);
+    const statusMeta = describeStatus(effectiveStatus);
 
     const chatSample = state.chat.slice(0, 50);
 
@@ -1064,7 +1050,7 @@ export default function DashboardShell({
         },
       },
     };
-  }, [state, ingestionConnected, effectiveStatus]);
+  }, [state, effectiveStatus]);
 
   const fetchAlerts = useCallback(
     async (force = false) => {
