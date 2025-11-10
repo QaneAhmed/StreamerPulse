@@ -52,6 +52,7 @@ const priorityLabel: Record<"high" | "medium" | "low", string> = {
   medium: "Medium",
   low: "Low",
 };
+const TIMESTAMP_REFRESH_INTERVAL_MS = 15000;
 
 function formatTimestamp(updatedAt: number) {
   const deltaSeconds = Math.max(0, Math.round((Date.now() - updatedAt) / 1000));
