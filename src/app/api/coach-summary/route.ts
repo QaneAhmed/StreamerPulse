@@ -142,6 +142,7 @@ const RequestSchema = z.object({
   history: HistorySchema,
   session: SessionSchema,
   baseline: BaselineSchema,
+  channel: z.string().optional(),
 });
 
 type AlertPriority = "high" | "medium" | "low";
@@ -267,26 +268,45 @@ function buildCalmAlert(timestamp: number) {
   };
 }
 
-const sessionAuthorMemory = new Map<string, number>();
+const channelAuthorMemory = new Map<string, Map<string, number>>();
 
 function normalizeAuthor(author: string) {
   return author.trim().toLowerCase();
 }
 
+function normalizeChannelKey(channel: string | null | undefined) {
+  const normalized = channel?.trim().toLowerCase();
+  return normalized && normalized.length > 0 ? normalized : "default";
+}
+
 function pruneAuthorMemory(now: number) {
-  for (const [key, lastSeen] of sessionAuthorMemory) {
-    if (now - lastSeen > AUTHOR_MEMORY_MS) {
-      sessionAuthorMemory.delete(key);
+  for (const [channel, memory] of channelAuthorMemory) {
+    for (const [author, lastSeen] of memory) {
+      if (now - lastSeen > AUTHOR_MEMORY_MS) {
+        memory.delete(author);
+      }
+    }
+    if (memory.size === 0) {
+      channelAuthorMemory.delete(channel);
     }
   }
 }
 
-function hasSeenAuthor(author: string) {
-  return sessionAuthorMemory.has(normalizeAuthor(author));
+function hasSeenAuthor(channelKey: string, author: string) {
+  const memory = channelAuthorMemory.get(channelKey);
+  if (!memory) {
+    return false;
+  }
+  return memory.has(normalizeAuthor(author));
 }
 
-function rememberAuthor(author: string, timestamp: number) {
-  sessionAuthorMemory.set(normalizeAuthor(author), timestamp);
+function rememberAuthor(channelKey: string, author: string, timestamp: number) {
+  let memory = channelAuthorMemory.get(channelKey);
+  if (!memory) {
+    memory = new Map();
+    channelAuthorMemory.set(channelKey, memory);
+  }
+  memory.set(normalizeAuthor(author), timestamp);
 }
 
 type ClassifiedMessage = z.infer<typeof MessageSchema> & {
@@ -384,6 +404,7 @@ export async function POST(request: Request) {
 
   const now = Date.now();
   pruneAuthorMemory(now);
+  const channelKey = normalizeChannelKey(payload.channel);
 
   const orderedMessages = [...payload.messages]
     .sort((a, b) => a.timestamp - b.timestamp)
@@ -612,7 +633,7 @@ export async function POST(request: Request) {
 
   const freshNewChatters = Array.from(latestMessageByAuthor.values()).filter((message) => {
     const key = normalizeAuthor(message.author);
-    if (hasSeenAuthor(key)) {
+    if (hasSeenAuthor(channelKey, key)) {
       return false;
     }
     return latestTimestamp - message.timestamp <= FRESH_CHATTER_WINDOW_MS;
@@ -655,7 +676,7 @@ export async function POST(request: Request) {
       }
     );
 
-    sortedFresh.forEach((message) => rememberAuthor(message.author, message.timestamp));
+    sortedFresh.forEach((message) => rememberAuthor(channelKey, message.author, message.timestamp));
   } else if (
     uniqueChattersValue >= 3 &&
     (newcomersBaselineReady
@@ -701,7 +722,7 @@ export async function POST(request: Request) {
         ),
       }
     );
-    rememberAuthor(name, latestTimestamp);
+    rememberAuthor(channelKey, name, latestTimestamp);
   }
 
   const returningBounce = authorsSeen.size >= 15 && (
@@ -1036,7 +1057,9 @@ export async function POST(request: Request) {
     aiAlertResult = null;
   }
 
-  classifiedMessages.forEach((message) => rememberAuthor(message.author, message.timestamp));
+  classifiedMessages.forEach((message) =>
+    rememberAuthor(channelKey, message.author, message.timestamp)
+  );
 
   const toneFromAlertType = (type: AlertType): "positive" | "neutral" | "negative" => {
     switch (type) {

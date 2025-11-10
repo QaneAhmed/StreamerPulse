@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AlertList from "./components/alert-list";
+import { ChatMessageText } from "./components/chat-message-text";
 import type { ChatTone } from "@/lib/ai/chat-tone";
 import { getTwitchEmoteImageUrl } from "@/lib/twitch/emotes";
 
@@ -48,6 +49,13 @@ type ChatMessage = {
   tone: ChatTone;
   toneConfidence: number | null;
   toneRationale: string | null;
+  emotes?: {
+    code: string;
+    id?: string | null;
+    imageUrl?: string | null;
+    start?: number | null;
+    end?: number | null;
+  }[];
 };
 
 type LiveState = {
@@ -232,7 +240,7 @@ const DASHBOARD_STORAGE_KEY = "streamerpulse:dashboard-state";
 const DASHBOARD_ALERTS_KEY = `${DASHBOARD_STORAGE_KEY}:alerts`;
 
 const MAX_TIMELINE_POINTS = 120;
-const MAX_CHAT_MESSAGES = 100;
+const MAX_CHAT_MESSAGES = 50;
 const MAX_EVENTS = 30;
 
 type DashboardAlert = {
@@ -491,7 +499,7 @@ function computeEffectiveStatus(
   if (session.status === "errored") {
     return "errored";
   }
-  if (session.status === "listening") {
+  if (session.status === "listening" || ingestionConnected) {
     return "listening";
   }
   if (session.startedAt) {
@@ -834,6 +842,7 @@ export default function DashboardShell({
           };
         }
         case "chat": {
+          setIngestionConnected(true);
           const filtered = prev.chat.filter((message) => message.id !== update.payload.id);
           const next = [update.payload, ...filtered].slice(0, MAX_CHAT_MESSAGES);
           return { ...prev, chat: next };
@@ -1135,6 +1144,7 @@ export default function DashboardShell({
           baseline: safeBaseline,
           history: historyPayload,
           session: sessionPayload,
+          channel: channelLogin ?? state.session.channel ?? null,
         };
 
         const response = await fetch("/api/coach-summary", {
@@ -1288,6 +1298,7 @@ export default function DashboardShell({
     [
       state.chat,
       state.session.startedAt,
+      state.session.channel,
       effectiveStatus,
       state.metrics.baseline.messageRate,
       state.metrics.baseline.uniqueChatters,
@@ -1299,6 +1310,7 @@ export default function DashboardShell({
       derived.sentimentMeta.label,
       derived.trendPercent,
       derived.toneSummary,
+      channelLogin,
     ]
   );
 
@@ -1364,12 +1376,12 @@ export default function DashboardShell({
                     key={message.id}
                     className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm leading-snug"
                   >
-                    <span className="font-semibold text-slate-300">
-                      @{message.author}
-                    </span>
-                    <span className="flex-1 break-words text-slate-200">
-                      {message.text}
-                    </span>
+                    <span className="font-semibold text-slate-300">@{message.author}</span>
+                    <ChatMessageText
+                      text={message.text}
+                      emotes={message.emotes}
+                      className="flex-1 break-words text-slate-200"
+                    />
                     <span className="shrink-0 text-xs uppercase tracking-[0.2em] text-slate-500">
                       {timeFormatter.format(new Date(message.timestamp))}
                     </span>

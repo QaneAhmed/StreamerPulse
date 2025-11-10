@@ -1,4 +1,5 @@
 import type { ChatTone } from "@/lib/ai/chat-tone";
+import { ChatMessageText } from "./chat-message-text";
 
 type ChatMessage = {
   id: string;
@@ -8,6 +9,13 @@ type ChatMessage = {
   tone?: ChatTone | null;
   toneConfidence?: number | null;
   toneRationale?: string | null;
+  emotes?: {
+    code: string;
+    id?: string | null;
+    imageUrl?: string | null;
+    start?: number | null;
+    end?: number | null;
+  }[];
 };
 
 type LiveChatFeedProps = {
@@ -80,7 +88,11 @@ export default function LiveChatFeed({ messages }: LiveChatFeedProps) {
                     <span>{timeFormatter.format(new Date(message.timestamp))}</span>
                   </div>
                   <div className="flex items-start justify-between gap-3">
-                    <p className="text-slate-200">{message.text}</p>
+                    <ChatMessageText
+                      text={message.text}
+                      emotes={message.emotes}
+                      className="flex-1 text-slate-200"
+                    />
                     <span
                       className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.25em] ${toneBadgeClasses[toneCategory(tone)]}`}
                     >

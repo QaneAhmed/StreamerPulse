@@ -39,6 +39,13 @@ type ChatMessage = {
   author: string;
   text: string;
   timestamp: number;
+  emotes?: {
+    code: string;
+    id?: string | null;
+    imageUrl?: string | null;
+    start?: number | null;
+    end?: number | null;
+  }[];
 };
 
 type BaselineSnapshot = {

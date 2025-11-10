@@ -47,6 +47,8 @@ type TrackedEmote = {
   code: string;
   id?: string | null;
   imageUrl?: string | null;
+  start?: number | null;
+  end?: number | null;
 };
 
 type EventItem = {
@@ -64,6 +66,7 @@ type ChatMessagePayload = {
   tone: ChatTone;
   toneConfidence: number;
   toneRationale?: string;
+  emotes: TrackedEmote[];
 };
 
 type BaselineSnapshot = {
@@ -915,9 +918,21 @@ function extractEmotes(message: string, tags: Tags) {
       const [start, end] = range.split("-").map((value) => Number.parseInt(value, 10));
       const code = message.slice(start, end + 1).trim();
       if (code) {
-        emotes.push({ code, id: emoteId ?? null, imageUrl: null });
+        emotes.push({
+          code,
+          id: emoteId ?? null,
+          imageUrl: null,
+          start,
+          end,
+        });
       } else if (emoteId) {
-        emotes.push({ code: emoteId, id: emoteId, imageUrl: null });
+        emotes.push({
+          code: emoteId,
+          id: emoteId,
+          imageUrl: null,
+          start,
+          end,
+        });
       }
     });
   });
@@ -936,7 +951,7 @@ function extractFallbackEmotes(message: string) {
       candidates.add(sanitized);
     }
   });
-  return Array.from(candidates).map((code) => ({ code, id: null, imageUrl: null }));
+  return Array.from(candidates).map((code) => ({ code, id: null, imageUrl: null, start: null, end: null }));
 }
 
 async function sendLiveFeedUpdates(channel: string | { channelLogin?: string; channel?: string }, updates: unknown[]) {
@@ -1819,12 +1834,12 @@ async function runSingleChannelIngest() {
         return;
       }
       const tokens = tokenizeMessage(message);
-      const emotes = extractEmotes(message, tags);
+      const emoteSegments = extractEmotes(message, tags);
       const fallbackEmotes = extractFallbackEmotes(message);
       const dedupedEmotes = new Map<string, TrackedEmote>();
       const seenCodes = new Set<string>();
 
-      emotes.forEach((emote) => {
+      emoteSegments.forEach((emote) => {
         const display = emote.code || emote.id || "";
         if (!display) {
           return;
@@ -1857,6 +1872,16 @@ async function runSingleChannelIngest() {
       });
 
       const allEmotes = Array.from(dedupedEmotes.values());
+      const chatEmotes = emoteSegments.concat(fallbackEmotes).map((segment) => {
+        const resolvedId = segment.id ?? resolveEmoteIdFromMap(segment.code) ?? null;
+        return {
+          code: segment.code,
+          id: resolvedId,
+          imageUrl: segment.imageUrl ?? buildEmoteImageUrl(resolvedId),
+          start: typeof segment.start === "number" ? segment.start : null,
+          end: typeof segment.end === "number" ? segment.end : null,
+        };
+      });
       const sentimentScoreRaw = sentimentAnalyzer.analyze(message).score;
       const sentimentScore = Math.max(-1, Math.min(1, sentimentScoreRaw / 10));
       const authorHash = hashAuthor(
@@ -1906,6 +1931,7 @@ async function runSingleChannelIngest() {
         tone: toneResult.tone,
         toneConfidence: toneResult.confidence,
         toneRationale: toneResult.rationale,
+        emotes: chatEmotes,
       };
 
       pendingMessages.push(chatPayload);
