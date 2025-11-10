@@ -627,12 +627,9 @@ export default function DashboardShell({
     const fallbackId = sessionStatus === "errored" ? "ingestion-error" : "monitoring-idle";
     const fallbackAlert: DashboardAlert = {
       id: fallbackId,
-      message:
-        sessionStatus === "errored"
-          ? "We lost connection to chat. Check your ingestion worker."
-          : "Monitoring chat for when you go live.",
-      tone: sessionStatus === "errored" ? "negative" : "neutral",
-      priority: sessionStatus === "errored" ? "high" : "medium",
+      message: "Waiting for you to go live.",
+      tone: "neutral",
+      priority: "medium",
       updatedAt: Date.now(),
     };
 
@@ -1219,39 +1216,12 @@ export default function DashboardShell({
           const recentToxic = derived.toneSummary?.recent.toxic ?? 0;
 
           const adjusted = sorted.map((alert) => {
-            const messageLower = alert.message.toLowerCase();
-            const isToxicAlert =
-              messageLower.includes("toxic") || messageLower.includes("toxicity");
-
             if (
               alert.message === CALM_ALERT_MESSAGE &&
               effectiveStatus !== "listening"
             ) {
               return null;
             }
-
-            if (
-              isToxicAlert &&
-              moodTone !== "negative" &&
-              (recentToxic === 0 || updateTime - alert.updatedAt > 60000)
-            ) {
-              return {
-                ...alert,
-                tone: moodTone,
-              };
-            }
-
-            if (
-              alert.tone === "negative" &&
-              moodTone !== "negative" &&
-              updateTime - alert.updatedAt > 90000
-            ) {
-              return {
-                ...alert,
-                tone: moodTone,
-              };
-            }
-
             return alert;
           });
 

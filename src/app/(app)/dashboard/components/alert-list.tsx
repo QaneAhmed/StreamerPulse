@@ -12,21 +12,46 @@ type AlertListProps = {
   alerts: Alert[];
 };
 
-const toneStyles: Record<"positive" | "neutral" | "negative", string> = {
-  positive: "border-emerald-500/50 bg-emerald-500/10",
-  neutral: "border-slate-800 bg-slate-900/60",
-  negative: "border-rose-500/40 bg-rose-500/10",
+const categoryStyles: Record<string, { card: string; badge: string }> = {
+  "new-chatter": {
+    card: "border-emerald-500/50 bg-emerald-500/10 text-emerald-50",
+    badge: "bg-emerald-500/25 text-emerald-100",
+  },
+  "chat-hype": {
+    card: "border-amber-400/50 bg-amber-500/10 text-amber-50",
+    badge: "bg-amber-500/25 text-amber-100",
+  },
+  "chat-laughter": {
+    card: "border-yellow-400/50 bg-yellow-500/10 text-yellow-50",
+    badge: "bg-yellow-500/25 text-yellow-100",
+  },
+  "tone-dip": {
+    card: "border-rose-500/50 bg-rose-500/10 text-rose-50",
+    badge: "bg-rose-500/25 text-rose-100",
+  },
+  "spam-warning": {
+    card: "border-rose-600/50 bg-rose-600/10 text-rose-50",
+    badge: "bg-rose-600/25 text-rose-100",
+  },
+  "velocity-surge-positive": {
+    card: "border-sky-500/50 bg-sky-500/10 text-sky-50",
+    badge: "bg-sky-500/25 text-sky-100",
+  },
+  "velocity-surge-negative": {
+    card: "border-orange-500/50 bg-orange-500/10 text-orange-50",
+    badge: "bg-orange-500/25 text-orange-100",
+  },
+  default: {
+    card: "border-slate-800 bg-slate-900/60 text-slate-100",
+    badge: "bg-slate-800/80 text-slate-300",
+  },
 };
 
-const priorityBadge: Record<"high" | "medium" | "low", { label: string; className: string }> = {
-  high: { label: "High", className: "bg-rose-500/20 text-rose-200" },
-  medium: { label: "Medium", className: "bg-amber-500/20 text-amber-200" },
-  low: { label: "Low", className: "bg-slate-700/40 text-slate-300" },
+const priorityLabel: Record<"high" | "medium" | "low", string> = {
+  high: "High",
+  medium: "Medium",
+  low: "Low",
 };
-
-const mutedToneStyle = "border-slate-800 bg-slate-900/40";
-const mutedBadgeStyle = "bg-slate-800/80 text-slate-400";
-const TIMESTAMP_REFRESH_INTERVAL_MS = 15000;
 
 function formatTimestamp(updatedAt: number) {
   const deltaSeconds = Math.max(0, Math.round((Date.now() - updatedAt) / 1000));
@@ -66,31 +91,25 @@ export default function AlertList({ alerts }: AlertListProps) {
     <div className="space-y-3">
       <h4 className="text-sm font-semibold text-slate-200">Alerts</h4>
       <ul className="space-y-3">
-        {alerts.map((alert, index) => {
-          const isLatest = index === 0;
-          const toneClass = isLatest ? toneStyles[alert.tone] : mutedToneStyle;
-          const badge = priorityBadge[alert.priority];
-          const badgeClass = isLatest ? badge.className : mutedBadgeStyle;
-          const messageClass = isLatest ? "text-slate-100" : "text-slate-300";
-          const timestampClass = isLatest
-            ? "text-slate-400"
-            : "text-slate-600";
+        {alerts.map((alert) => {
+          const baseId = alert.id.split("-").slice(0, -1).join("-");
+          const styles = categoryStyles[baseId] ?? categoryStyles.default;
           return (
             <li
               key={alert.id}
-              className={`rounded-xl border px-3 py-3 text-sm transition-colors ${toneClass}`}
+              className={`rounded-xl border px-3 py-3 text-sm transition-colors ${styles.card}`}
             >
               <div className="flex items-center justify-between gap-3">
-                <span className={`text-xs font-semibold uppercase tracking-[0.3em] ${timestampClass}`}>
+                <span className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
                   {formatTimestamp(alert.updatedAt)}
                 </span>
                 <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.25em] ${badgeClass}`}
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.25em] ${styles.badge}`}
                 >
-                  {badge.label}
+                  {priorityLabel[alert.priority]}
                 </span>
               </div>
-              <p className={`mt-2 text-sm font-medium ${messageClass}`}>{alert.message}</p>
+              <p className="mt-2 text-sm font-medium text-slate-100">{alert.message}</p>
             </li>
           );
         })}
