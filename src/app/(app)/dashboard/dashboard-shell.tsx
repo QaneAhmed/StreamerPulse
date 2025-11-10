@@ -499,7 +499,7 @@ function computeEffectiveStatus(
   if (session.status === "errored") {
     return "errored";
   }
-  if (session.status === "listening" || ingestionConnected) {
+  if (session.status === "listening") {
     return "listening";
   }
   if (session.startedAt) {
@@ -842,7 +842,6 @@ export default function DashboardShell({
           };
         }
         case "chat": {
-          setIngestionConnected(true);
           const filtered = prev.chat.filter((message) => message.id !== update.payload.id);
           const next = [update.payload, ...filtered].slice(0, MAX_CHAT_MESSAGES);
           return { ...prev, chat: next };

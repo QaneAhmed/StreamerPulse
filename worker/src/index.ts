@@ -1651,7 +1651,7 @@ async function runSingleChannelIngest() {
               channel: channelDisplayName,
               channelLogin: twitchChannel,
               startedAt: sessionStartedAt,
-              ingestionConnected: true,
+              ingestionConnected: !!activeStreamId,
             },
           });
         }
@@ -1665,24 +1665,6 @@ async function runSingleChannelIngest() {
         );
         await startIngestionSession(now);
       } else if (!isLive && activeStreamId) {
-        if (recentlyActive) {
-          if (lastReportedStatus !== "live") {
-            lastReportedStatus = "live";
-            await postLiveFeed(twitchChannel, {
-              type: "session",
-              channel: twitchChannel,
-              channelLogin: twitchChannel,
-              payload: {
-                status: "listening",
-                channel: channelDisplayName,
-                channelLogin: twitchChannel,
-                startedAt: sessionStartedAt,
-                ingestionConnected: true,
-              },
-            });
-          }
-          return;
-        }
         console.log(
           `[twitch:${twitchChannel}] Channel ${channelLabel} went offline (detected via ${context}). Ending ingestion.`
         );
@@ -1702,22 +1684,6 @@ async function runSingleChannelIngest() {
           },
         });
       } else if (!isLive && lastReportedStatus !== "offline") {
-        if (recentlyActive) {
-          lastReportedStatus = "live";
-          await postLiveFeed(twitchChannel, {
-            type: "session",
-            channel: twitchChannel,
-            channelLogin: twitchChannel,
-            payload: {
-              status: "listening",
-              channel: channelDisplayName,
-              channelLogin: twitchChannel,
-              startedAt: sessionStartedAt,
-              ingestionConnected: true,
-            },
-          });
-          return;
-        }
         lastReportedStatus = "offline";
         aggregator.reset();
         pendingMessages = [];
